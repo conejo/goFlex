@@ -2,6 +2,12 @@
 
 package main
 
+import "github.com/charmbracelet/lipgloss"
+
+const contPrefix = "  ↳ "
+
+var styleContPrefix = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
 // wordWrap breaks s into lines no wider than width, preferring space boundaries.
 // Falls back to a hard break when no space exists within the width.
 func wordWrap(s string, width int) []string {

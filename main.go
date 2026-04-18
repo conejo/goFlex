@@ -3,16 +3,21 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
+	addr := flag.String("addr", defaultRadioAddr, "FlexRadio address (host or host:port)")
+	flag.Parse()
+
 	p := tea.NewProgram(
 		model{
+			addr:   *addr,
 			status: "Press Enter to connect",
-			subs:   append([]subscription(nil), defaultSubs...),
+			subs:   newDefaultSubs(),
 		},
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
