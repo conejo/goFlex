@@ -8,12 +8,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Run starts the Bubble Tea TUI with the given address and log-line limit.
-func Run(addr string, maxLog int) {
+// Run starts the Bubble Tea TUI.
+func Run(maxLog int) {
 	p := tea.NewProgram(
 		model{
-			addr:   addr,
-			status: "Press Enter to connect",
+			status: "Scanning for radios…",
 			subs:   newDefaultSubs(),
 			maxLog: maxLog,
 		},

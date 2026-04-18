@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -26,6 +27,13 @@ type connectedMsg struct {
 
 type statusLineMsg struct{ text string }
 type logLineMsg struct{ text string }
+
+type discoveryStartedMsg struct {
+	ch     chan tea.Msg
+	cancel context.CancelFunc
+}
+type radioDiscoveredMsg struct{ info radio.RadioInfo }
+type radioLostMsg struct{ serial string }
 
 // ─── Subscription list ────────────────────────────────────────────────────────
 
@@ -68,10 +76,18 @@ func newDefaultSubs() []subscription {
 // ─── Model ────────────────────────────────────────────────────────────────────
 
 type model struct {
-	addr         string
-	connected    bool
-	connecting   bool
-	conn         *radio.Conn
+	// Discovery phase
+	discovering    bool
+	radios         []radio.RadioInfo
+	discoverCh     chan tea.Msg
+	cancelDiscover context.CancelFunc
+
+	// Connection
+	addr       string
+	connected  bool
+	connecting bool
+	conn       *radio.Conn
+
 	errMsg       string
 	status       string
 	logs         []string
@@ -133,7 +149,7 @@ func (m model) maxScrollOffset() int {
 	return 0
 }
 
-// withScrollUp moves the subscription cursor up or scrolls the log up by one line.
+// withScrollUp moves the cursor up or scrolls the log up by one line.
 func (m model) withScrollUp() model {
 	if m.connected && !m.showSubs {
 		if max := m.maxScrollOffset(); m.scrollOffset < max {
@@ -145,21 +161,29 @@ func (m model) withScrollUp() model {
 	return m
 }
 
-// withScrollDown moves the subscription cursor down or scrolls the log down.
+// withScrollDown moves the cursor down or scrolls the log down.
 func (m model) withScrollDown() model {
 	if m.connected && !m.showSubs {
 		if m.scrollOffset > 0 {
 			m.scrollOffset--
 		}
-	} else if !m.connecting && m.cursor < len(m.subs)-1 {
-		m.cursor++
+	} else if !m.connecting {
+		var maxCursor int
+		if m.discovering {
+			maxCursor = len(m.radios) - 1
+		} else {
+			maxCursor = len(m.subs) - 1
+		}
+		if m.cursor < maxCursor {
+			m.cursor++
+		}
 	}
 	return m
 }
 
 // ─── Init / Update / View ─────────────────────────────────────────────────────
 
-func (m model) Init() tea.Cmd { return nil }
+func (m model) Init() tea.Cmd { return startDiscoveryCmd() }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -172,6 +196,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			if m.conn != nil {
 				m.conn.Close()
+			}
+			if m.cancelDiscover != nil {
+				m.cancelDiscover()
 			}
 			return m, tea.Quit
 		case "s", "tab":
@@ -202,7 +229,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "enter":
-			if !m.connected && !m.connecting {
+			if m.discovering && len(m.radios) > 0 {
+				// Select the highlighted radio and move to subscription screen.
+				if m.cursor >= len(m.radios) {
+					m.cursor = len(m.radios) - 1
+				}
+				sel := m.radios[m.cursor]
+				if m.cancelDiscover != nil {
+					m.cancelDiscover()
+				}
+				m.discovering = false
+				m.addr = fmt.Sprintf("%s:%d", sel.Address, sel.Port)
+				m.status = fmt.Sprintf("%s  %s", sel.Model, sel.Address)
+				m.cursor = 0
+			} else if !m.connected && !m.connecting && !m.discovering {
 				m.connecting = true
 				m.errMsg = ""
 				m.status = "Connecting…"
@@ -216,6 +256,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.withScrollUp()
 		case tea.MouseButtonWheelDown:
 			m = m.withScrollDown()
+		}
+
+	case discoveryStartedMsg:
+		m.discovering = true
+		m.discoverCh = msg.ch
+		m.cancelDiscover = msg.cancel
+		return m, nextMsg(m.discoverCh)
+
+	case radioDiscoveredMsg:
+		m.radios = upsertRadio(m.radios, msg.info)
+		// Keep cursor in bounds.
+		if m.cursor >= len(m.radios) {
+			m.cursor = len(m.radios) - 1
+		}
+		if m.discovering {
+			return m, nextMsg(m.discoverCh)
+		}
+
+	case radioLostMsg:
+		m.radios = removeRadio(m.radios, msg.serial)
+		if m.cursor >= len(m.radios) && m.cursor > 0 {
+			m.cursor = len(m.radios) - 1
+		}
+		if m.discovering {
+			return m, nextMsg(m.discoverCh)
 		}
 
 	case connectedMsg:
@@ -253,6 +318,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) viewHeader() string {
 	var btn string
 	switch {
+	case m.discovering:
+		btn = styleButtonDis.Render("Discovering…")
 	case m.connecting:
 		btn = styleButtonDis.Render("Connecting…")
 	case m.connected:
@@ -269,6 +336,30 @@ func (m model) viewHeader() string {
 		statusText = styleStatus.Render(m.status)
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Center, btn, "  ", statusText)
+}
+
+func (m model) viewRadioList() string {
+	if len(m.radios) == 0 {
+		return styleSubLabelDim.Render("  Scanning for radios…")
+	}
+	var sb strings.Builder
+	for i, r := range m.radios {
+		var statusStyle lipgloss.Style
+		if r.Status == "Available" {
+			statusStyle = styleConnected
+		} else {
+			statusStyle = styleErr
+		}
+		line := fmt.Sprintf(" %-14s %-16s %s",
+			r.Model, r.Address, statusStyle.Render(r.Status))
+		if i == m.cursor {
+			line = styleCursor.Render("▶") + line
+		} else {
+			line = " " + line
+		}
+		sb.WriteString(line + "\n")
+	}
+	return sb.String()
 }
 
 func (m model) viewSubsPanel() string {
@@ -377,6 +468,8 @@ func buildScrollbar(height, total, start int) []string {
 func (m model) viewHelp() string {
 	var text string
 	switch {
+	case m.discovering:
+		text = "↑/↓: navigate   enter: select radio   q: quit"
 	case m.connected && m.showSubs:
 		text = "↑/↓: navigate   space: toggle sub   s/Tab: hide subs   q: quit"
 	case m.connected && m.scrollOffset > 0:
@@ -391,6 +484,13 @@ func (m model) viewHelp() string {
 
 func (m model) View() string {
 	sep := strings.Repeat("─", m.width)
+	if m.discovering {
+		return strings.Join([]string{
+			m.viewHeader() + "\n" + sep,
+			m.viewRadioList(),
+			m.viewHelp(),
+		}, "\n")
+	}
 	return strings.Join([]string{
 		m.viewHeader() + m.viewSubsPanel() + sep,
 		m.viewLogPane(),
@@ -450,6 +550,51 @@ func toggleSubCmd(conn *radio.Conn, s subscription) tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// startDiscoveryCmd opens the UDP discovery socket and returns a discoveryStartedMsg.
+func startDiscoveryCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		evtCh, err := radio.Listen(ctx)
+		if err != nil {
+			cancel()
+			return statusLineMsg{text: fmt.Sprintf("discovery error: %v", err)}
+		}
+		ch := make(chan tea.Msg, 16)
+		go func() {
+			for evt := range evtCh {
+				if evt.Lost {
+					ch <- radioLostMsg{serial: evt.Radio.Serial}
+				} else {
+					ch <- radioDiscoveredMsg{info: evt.Radio}
+				}
+			}
+			close(ch)
+		}()
+		return discoveryStartedMsg{ch: ch, cancel: cancel}
+	}
+}
+
+// upsertRadio adds or updates a radio in the list, keyed by serial.
+func upsertRadio(radios []radio.RadioInfo, info radio.RadioInfo) []radio.RadioInfo {
+	for i, r := range radios {
+		if r.Serial == info.Serial {
+			radios[i] = info
+			return radios
+		}
+	}
+	return append(radios, info)
+}
+
+// removeRadio removes the radio with the given serial from the list.
+func removeRadio(radios []radio.RadioInfo, serial string) []radio.RadioInfo {
+	for i, r := range radios {
+		if r.Serial == serial {
+			return append(radios[:i], radios[i+1:]...)
+		}
+	}
+	return radios
 }
 
 // nextMsg reads one message from ch as a Cmd.
