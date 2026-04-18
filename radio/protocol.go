@@ -1,6 +1,6 @@
 // protocol.go — SmartSDR wire protocol parser.
 //
-// Protocol wire format (from RadioConnection.cpp / CommandParser.cpp):
+// Protocol wire format:
 //   Inbound lines, newline-terminated:
 //     V<version>               — firmware version string
 //     H<hex-handle>            — client handle assigned by radio
@@ -10,27 +10,27 @@
 //   Outbound commands:
 //     C<seq>|<command>\n
 
-package main
+package radio
 
 import (
 	"strconv"
 	"strings"
 )
 
-// MsgType identifies the kind of line received from the radio.
-type MsgType int
+// msgType identifies the kind of line received from the radio.
+type msgType int
 
 const (
-	MsgUnknown  MsgType = iota
-	MsgVersion          // V<version>
-	MsgHandle           // H<hex-handle>
-	MsgResponse         // R<seq>|<code>|<body>
-	MsgStatus           // S<handle>|<obj> k=v …
+	msgUnknown  msgType = iota
+	msgVersion          // V<version>
+	msgHandle           // H<hex-handle>
+	msgResponse         // R<seq>|<code>|<body>
+	msgStatus           // S<handle>|<obj> k=v …
 )
 
-// ParsedMessage mirrors CommandParser::ParsedMessage.
+// ParsedMessage is the result of parsing one line received from the radio.
 type ParsedMessage struct {
-	Type       MsgType
+	Type       msgType
 	Raw        string
 	Object     string            // version string, status object name, or response body
 	Handle     uint32            // hex handle from H or S lines
@@ -53,7 +53,7 @@ func parseKVs(body string) map[string]string {
 	return kvs
 }
 
-// parseLine mirrors CommandParser::parseLine.
+// parseLine parses one newline-terminated line from the radio.
 func parseLine(raw string) ParsedMessage {
 	raw = strings.TrimSpace(raw)
 	msg := ParsedMessage{Raw: raw}
@@ -66,16 +66,16 @@ func parseLine(raw string) ParsedMessage {
 
 	switch tag {
 	case 'V':
-		msg.Type = MsgVersion
+		msg.Type = msgVersion
 		msg.Object = body
 
 	case 'H':
-		msg.Type = MsgHandle
+		msg.Type = msgHandle
 		h, _ := strconv.ParseUint(body, 16, 32)
 		msg.Handle = uint32(h)
 
 	case 'R':
-		msg.Type = MsgResponse
+		msg.Type = msgResponse
 		parts := strings.SplitN(body, "|", 3)
 		if len(parts) >= 1 {
 			seq, _ := strconv.ParseUint(parts[0], 10, 32)
@@ -91,7 +91,7 @@ func parseLine(raw string) ParsedMessage {
 		}
 
 	case 'S':
-		msg.Type = MsgStatus
+		msg.Type = msgStatus
 		pipe := strings.IndexByte(body, '|')
 		if pipe < 0 {
 			break
@@ -100,8 +100,6 @@ func parseLine(raw string) ParsedMessage {
 		msg.Handle = uint32(h)
 		statusBody := body[pipe+1:]
 
-		// Object name may be multi-word ("slice 0", "display pan 0x40000000").
-		// KV tokens always contain '='; object tokens never do.
 		tokens := strings.Fields(statusBody)
 		objTokens := []string{}
 		kvStart := len(tokens)

@@ -1,6 +1,6 @@
 // radio.go — TCP connection to a FlexRadio (SmartSDR protocol).
 
-package main
+package radio
 
 import (
 	"bufio"
@@ -13,21 +13,20 @@ import (
 
 const defaultPort = 4992
 
-// RadioConn is a minimal TCP connection to a FlexRadio.
-type RadioConn struct {
+// Conn is a live TCP connection to a FlexRadio.
+type Conn struct {
 	conn      net.Conn
 	scanner   *bufio.Scanner
 	seqCtr    atomic.Uint32
 	Handle    uint32
 	Version   string
 	callbacks map[uint32]func(code int, body string)
-	// OnLog is called (if set) for every sent command and received response.
+	// OnLog is called (if set) for every sent command and received line.
 	OnLog func(direction, line string)
 }
 
-// Dial opens a TCP connection to the radio and waits for V + H.
-// Returns once the radio has issued both (connection is ready for commands).
-func Dial(address string) (*RadioConn, error) {
+// Dial opens a TCP connection to the radio and waits for the V + H handshake.
+func Dial(address string) (*Conn, error) {
 	addr := address
 	if !strings.Contains(addr, ":") {
 		addr = fmt.Sprintf("%s:%d", addr, defaultPort)
@@ -38,7 +37,7 @@ func Dial(address string) (*RadioConn, error) {
 		return nil, fmt.Errorf("radio dial: %w", err)
 	}
 
-	rc := &RadioConn{
+	rc := &Conn{
 		conn:      c,
 		scanner:   bufio.NewScanner(c),
 		callbacks: make(map[uint32]func(int, string)),
@@ -53,16 +52,16 @@ func Dial(address string) (*RadioConn, error) {
 }
 
 // readHandshake reads lines until both V and H are received.
-func (rc *RadioConn) readHandshake() error {
+func (rc *Conn) readHandshake() error {
 	gotVersion := false
 	gotHandle := false
 	for rc.scanner.Scan() {
 		msg := parseLine(rc.scanner.Text())
 		switch msg.Type {
-		case MsgVersion:
+		case msgVersion:
 			rc.Version = msg.Object
 			gotVersion = true
-		case MsgHandle:
+		case msgHandle:
 			rc.Handle = msg.Handle
 			gotHandle = true
 		}
@@ -76,9 +75,8 @@ func (rc *RadioConn) readHandshake() error {
 	return fmt.Errorf("connection closed before handshake complete")
 }
 
-// Send transmits a command and returns the sequence number.
-// An optional callback is called when the R-line response arrives.
-func (rc *RadioConn) Send(command string, cb func(code int, body string)) (uint32, error) {
+// Send transmits a command and optionally registers a response callback.
+func (rc *Conn) Send(command string, cb func(code int, body string)) (uint32, error) {
 	seq := rc.seqCtr.Add(1)
 	if cb != nil {
 		rc.callbacks[seq] = cb
@@ -94,14 +92,14 @@ func (rc *RadioConn) Send(command string, cb func(code int, body string)) (uint3
 	return seq, nil
 }
 
-// ReadLoop reads incoming lines until the connection closes.
-// Responses are dispatched to registered callbacks; S-lines call onStatus.
-func (rc *RadioConn) ReadLoop(onStatus func(msg ParsedMessage)) error {
+// ReadLoop reads incoming lines until the connection closes, dispatching
+// responses to registered callbacks and status lines to onStatus.
+func (rc *Conn) ReadLoop(onStatus func(ParsedMessage)) error {
 	for rc.scanner.Scan() {
 		raw := rc.scanner.Text()
 		msg := parseLine(raw)
 		switch msg.Type {
-		case MsgResponse:
+		case msgResponse:
 			if rc.OnLog != nil {
 				rc.OnLog("rx", raw)
 			}
@@ -109,7 +107,7 @@ func (rc *RadioConn) ReadLoop(onStatus func(msg ParsedMessage)) error {
 				delete(rc.callbacks, msg.Sequence)
 				cb(msg.ResultCode, msg.Object)
 			}
-		case MsgStatus:
+		case msgStatus:
 			if onStatus != nil {
 				onStatus(msg)
 			}
@@ -119,4 +117,4 @@ func (rc *RadioConn) ReadLoop(onStatus func(msg ParsedMessage)) error {
 }
 
 // Close shuts down the connection.
-func (rc *RadioConn) Close() { rc.conn.Close() }
+func (rc *Conn) Close() { rc.conn.Close() }

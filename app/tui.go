@@ -1,6 +1,6 @@
 // tui.go — Bubble Tea TUI for the FlexRadio client.
 
-package main
+package app
 
 import (
 	"fmt"
@@ -9,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
+
+	"goFlex/radio"
 )
 
 const defaultRadioAddr = "192.168.50.151"
@@ -17,7 +19,7 @@ const maxLogLines = 500
 // ─── Tea messages ─────────────────────────────────────────────────────────────
 
 type connectedMsg struct {
-	radio    *RadioConn
+	conn     *radio.Conn
 	errMsg   string
 	initLogs []string
 }
@@ -69,7 +71,7 @@ type model struct {
 	addr         string
 	connected    bool
 	connecting   bool
-	radio        *RadioConn
+	conn         *radio.Conn
 	errMsg       string
 	status       string
 	logs         []string
@@ -168,8 +170,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
-			if m.radio != nil {
-				m.radio.Close()
+			if m.conn != nil {
+				m.conn.Close()
 			}
 			return m, tea.Quit
 		case "s", "tab":
@@ -195,8 +197,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case " ":
 			if !m.connecting && (m.showSubs || !m.connected) {
 				m.subs[m.cursor].checked = !m.subs[m.cursor].checked
-				if m.connected && m.radio != nil {
-					return m, toggleSubCmd(m.radio, m.subs[m.cursor])
+				if m.connected && m.conn != nil {
+					return m, toggleSubCmd(m.conn, m.subs[m.cursor])
 				}
 			}
 		case "enter":
@@ -223,11 +225,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Disconnected"
 		} else {
 			m.connected = true
-			m.radio = msg.radio
+			m.conn = msg.conn
 			m.logs = append(m.logs, msg.initLogs...)
-			m.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", m.radio.Handle, m.radio.Version)
+			m.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", m.conn.Handle, m.conn.Version)
 			m.readCh = make(chan tea.Msg, 64)
-			return m, readLoopCmd(m.radio, m.readCh)
+			return m, readLoopCmd(m.conn, m.readCh)
 		}
 
 	case statusLineMsg:
@@ -325,14 +327,18 @@ func (m model) viewLogPane() string {
 	}
 	visible := displayLines[start:end]
 
-	// Build scrollbar column.
 	bar := buildScrollbar(logHeight, total, start)
 
-	// Join log lines with scrollbar column.
 	var sb strings.Builder
 	for i, line := range visible {
+		// Pad to wrapWidth so the scrollbar column stays aligned regardless
+		// of the visual width of each log line (which may contain ANSI codes).
+		pad := wrapWidth - lipgloss.Width(line)
+		if pad < 0 {
+			pad = 0
+		}
 		sb.WriteString(line)
-		sb.WriteString(" ")
+		sb.WriteString(strings.Repeat(" ", pad+1))
 		sb.WriteString(bar[i])
 		if i < len(visible)-1 {
 			sb.WriteString("\n")
@@ -342,7 +348,7 @@ func (m model) viewLogPane() string {
 }
 
 // buildScrollbar returns a slice of len `height` single-character strings
-// representing a minimal scrollbar for content of `total` lines, with `start`
+// representing a minimal scrollbar for content of `total` lines with `start`
 // being the first visible line.
 func buildScrollbar(height, total, start int) []string {
 	bar := make([]string, height)
@@ -351,15 +357,12 @@ func buildScrollbar(height, total, start int) []string {
 		bar[i] = track
 	}
 	if total <= height {
-		// All content fits — no thumb needed.
 		return bar
 	}
-	// Thumb height proportional to visible fraction, min 1.
 	thumbH := height * height / total
 	if thumbH < 1 {
 		thumbH = 1
 	}
-	// Thumb position: map start → [0, height-thumbH].
 	maxStart := total - height
 	thumbTop := 0
 	if maxStart > 0 {
@@ -406,13 +409,13 @@ func (m model) connectCmd() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		radio, err := Dial(m.addr)
+		conn, err := radio.Dial(m.addr)
 		if err != nil {
 			return connectedMsg{errMsg: err.Error()}
 		}
 
 		var initLogs []string
-		radio.OnLog = func(dir, line string) {
+		conn.OnLog = func(dir, line string) {
 			var text string
 			if dir == "tx" {
 				text = styleTx.Render("→ ") + line
@@ -423,27 +426,27 @@ func (m model) connectCmd() tea.Cmd {
 		}
 
 		for _, name := range subs {
-			radio.Send(fmt.Sprintf("sub %s all", name), nil)
+			conn.Send(fmt.Sprintf("sub %s all", name), nil)
 		}
 		guiClientID := uuid.New().String()
-		radio.Send(fmt.Sprintf("client gui %s", guiClientID), func(code int, body string) {
+		conn.Send(fmt.Sprintf("client gui %s", guiClientID), func(code int, body string) {
 			if code == 0 {
-				radio.Send("client program AetherSDR", nil)
-				radio.Send("client station AetherSDR-Go", nil)
+				conn.Send("client program AetherSDR", nil)
+				conn.Send("client station AetherSDR-Go", nil)
 			}
 		})
 
-		return connectedMsg{radio: radio, initLogs: initLogs}
+		return connectedMsg{conn: conn, initLogs: initLogs}
 	}
 }
 
 // toggleSubCmd sends sub/unsub for a single subscription while connected.
-func toggleSubCmd(radio *RadioConn, s subscription) tea.Cmd {
+func toggleSubCmd(conn *radio.Conn, s subscription) tea.Cmd {
 	return func() tea.Msg {
 		if s.checked {
-			radio.Send(fmt.Sprintf("sub %s all", s.name), nil)
+			conn.Send(fmt.Sprintf("sub %s all", s.name), nil)
 		} else {
-			radio.Send(fmt.Sprintf("unsub %s all", s.name), nil)
+			conn.Send(fmt.Sprintf("unsub %s all", s.name), nil)
 		}
 		return nil
 	}
@@ -461,8 +464,8 @@ func nextMsg(ch chan tea.Msg) tea.Cmd {
 }
 
 // readLoopCmd fans out status lines into ch and starts draining with nextMsg.
-func readLoopCmd(radio *RadioConn, ch chan tea.Msg) tea.Cmd {
-	radio.OnLog = func(direction, line string) {
+func readLoopCmd(conn *radio.Conn, ch chan tea.Msg) tea.Cmd {
+	conn.OnLog = func(direction, line string) {
 		var text string
 		if direction == "tx" {
 			text = styleTx.Render("→ ") + line
@@ -472,7 +475,7 @@ func readLoopCmd(radio *RadioConn, ch chan tea.Msg) tea.Cmd {
 		ch <- logLineMsg{text: text}
 	}
 	go func() {
-		err := radio.ReadLoop(func(msg ParsedMessage) {
+		err := conn.ReadLoop(func(msg radio.ParsedMessage) {
 			ch <- logLineMsg{text: fmt.Sprintf("%-30s %v", msg.Object, msg.KVs)}
 		})
 		if err != nil {
@@ -483,38 +486,4 @@ func readLoopCmd(radio *RadioConn, ch chan tea.Msg) tea.Cmd {
 		close(ch)
 	}()
 	return nextMsg(ch)
-}
-
-// ─── Log rendering ────────────────────────────────────────────────────────────
-
-// wrapLogEntries wraps each log entry to wrapWidth, indenting continuation lines.
-func wrapLogEntries(entries []string, wrapWidth int) []string {
-	if wrapWidth < 20 {
-		wrapWidth = 20
-	}
-	contPrefixLen := len([]rune(contPrefix))
-	contWidth := wrapWidth - contPrefixLen
-	if contWidth < 1 {
-		contWidth = 1
-	}
-
-	wrapped := make([]string, 0, len(entries))
-	for _, l := range entries {
-		lines := wordWrap(l, wrapWidth)
-		if len(lines) == 0 {
-			wrapped = append(wrapped, l)
-			continue
-		}
-		var sb strings.Builder
-		sb.WriteString(lines[0])
-		for _, cont := range lines[1:] {
-			for _, cl := range wordWrap(cont, contWidth) {
-				sb.WriteString("\n")
-				sb.WriteString(styleContPrefix.Render(contPrefix))
-				sb.WriteString(cl)
-			}
-		}
-		wrapped = append(wrapped, sb.String())
-	}
-	return wrapped
 }

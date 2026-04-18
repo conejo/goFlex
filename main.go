@@ -4,27 +4,16 @@ package main
 
 import (
 	"flag"
-	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"goFlex/app"
 )
 
 func main() {
-	addr := flag.String("addr", defaultRadioAddr, "FlexRadio address (host or host:port)")
-	maxLog := flag.Int("log-lines", maxLogLines, "maximum log entries to retain")
+	var addr string
+	var maxLog int
+	flag.StringVar(&addr, "addr", "192.168.50.151", "FlexRadio address (host or host:port)")
+	flag.IntVar(&maxLog, "log-lines", 500, "maximum log entries to retain")
 	flag.Parse()
 
-	p := tea.NewProgram(
-		model{
-			addr:   *addr,
-			status: "Press Enter to connect",
-			subs:   newDefaultSubs(),
-			maxLog: *maxLog,
-		},
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
-	if _, err := p.Run(); err != nil {
-		fmt.Printf("error: %v\n", err)
-	}
+	app.Run(addr, maxLog)
 }
