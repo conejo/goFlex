@@ -33,31 +33,49 @@ type subscription struct {
 }
 
 var defaultSubs = []subscription{
+	// Core — checked by default
 	{name: "slice", label: "Slice", checked: true},
 	{name: "pan", label: "Panadapter", checked: true},
 	{name: "tx", label: "TX", checked: true},
 	{name: "meter", label: "Meter", checked: true},
+	{name: "audio", label: "Audio", checked: true},
+	{name: "radio", label: "Radio", checked: true},
+	{name: "client", label: "Client", checked: true},
+	// Optional hardware
 	{name: "atu", label: "ATU", checked: false},
 	{name: "amplifier", label: "Amplifier", checked: false},
 	{name: "gps", label: "GPS", checked: false},
 	{name: "xvtr", label: "Transverter", checked: false},
-	{name: "memory", label: "Memory", checked: false},
+	{name: "apd", label: "APD", checked: false},
+	// Digital / data
+	{name: "tnf", label: "TNF", checked: false},
+	{name: "memories", label: "Memories", checked: false},
+	{name: "cwx", label: "CWX", checked: false},
+	{name: "dax", label: "DAX", checked: false},
+	{name: "daxiq", label: "DAX IQ", checked: false},
+	{name: "codec", label: "Codec", checked: false},
+	{name: "dvk", label: "DVK", checked: false},
+	{name: "usb_cable", label: "USB Cable", checked: false},
+	{name: "spot", label: "Spot", checked: false},
+	{name: "license", label: "License", checked: false},
 }
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 
 type model struct {
-	connected  bool
-	connecting bool
-	radio      *RadioConn
-	errMsg     string
-	status     string
-	logs       []string
-	height     int
-	width      int
-	readCh     chan tea.Msg
-	subs       []subscription
-	cursor     int
+	connected    bool
+	connecting   bool
+	radio        *RadioConn
+	errMsg       string
+	status       string
+	logs         []string
+	height       int
+	width        int
+	readCh       chan tea.Msg
+	subs         []subscription
+	cursor       int
+	scrollOffset int  // display lines scrolled up from bottom; 0 = pinned to bottom
+	showSubs     bool // subscription panel visible while connected
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -74,7 +92,25 @@ var (
 	styleUnchecked   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	styleSubLabel    = lipgloss.NewStyle()
 	styleSubLabelDim = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	styleTx          = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))  // blue — outgoing commands
+	styleRx          = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // amber — responses
 )
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// logHeight returns the number of display lines available for the log pane.
+func (m model) logHeight() int {
+	subsLines := 0
+	if !m.connected || m.showSubs {
+		// "\nSubscriptions:\n" + N sub rows
+		subsLines = 2 + len(m.subs)
+	}
+	h := m.height - 3 - subsLines
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
 
 // ─── Init / Update / View ─────────────────────────────────────────────────────
 
@@ -93,17 +129,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.radio.Close()
 			}
 			return m, tea.Quit
+		case "s", "tab":
+			if m.connected {
+				m.showSubs = !m.showSubs
+			}
 		case "up", "k":
-			if !m.connected && !m.connecting && m.cursor > 0 {
+			if m.connected && !m.showSubs {
+				m.scrollOffset++
+			} else if !m.connecting && m.cursor > 0 {
 				m.cursor--
 			}
 		case "down", "j":
-			if !m.connected && !m.connecting && m.cursor < len(m.subs)-1 {
+			if m.connected && !m.showSubs {
+				if m.scrollOffset > 0 {
+					m.scrollOffset--
+				}
+			} else if !m.connecting && m.cursor < len(m.subs)-1 {
 				m.cursor++
 			}
+		case "pgup":
+			m.scrollOffset += m.logHeight()
+		case "pgdown":
+			m.scrollOffset -= m.logHeight()
+			if m.scrollOffset < 0 {
+				m.scrollOffset = 0
+			}
+		case "G", "end":
+			m.scrollOffset = 0
 		case " ":
-			if !m.connected && !m.connecting {
+			if !m.connecting && (m.showSubs || !m.connected) {
 				m.subs[m.cursor].checked = !m.subs[m.cursor].checked
+				if m.connected && m.radio != nil {
+					return m, m.toggleSubCmd(m.subs[m.cursor])
+				}
 			}
 		case "enter":
 			if !m.connected && !m.connecting {
@@ -111,6 +169,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.errMsg = ""
 				m.status = "Connecting…"
 				return m, m.connectCmd()
+			}
+		}
+
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			if m.connected && !m.showSubs {
+				m.scrollOffset++
+			} else if !m.connecting && m.cursor > 0 {
+				m.cursor--
+			}
+		case tea.MouseButtonWheelDown:
+			if m.connected && !m.showSubs {
+				if m.scrollOffset > 0 {
+					m.scrollOffset--
+				}
+			} else if !m.connecting && m.cursor < len(m.subs)-1 {
+				m.cursor++
 			}
 		}
 
@@ -162,9 +238,9 @@ func (m model) View() string {
 
 	header := lipgloss.JoinHorizontal(lipgloss.Center, btn, "  ", statusText)
 
-	// Subscription checkboxes — shown before connecting.
+	// Subscription checkboxes — shown before connecting and when showSubs is true.
 	var subsBlock string
-	if !m.connected {
+	if !m.connected || m.showSubs {
 		var sb strings.Builder
 		for i, s := range m.subs {
 			var box, label string
@@ -179,7 +255,7 @@ func (m model) View() string {
 				label = styleSubLabelDim.Render(s.label)
 			}
 			row := fmt.Sprintf(" %s %s", box, label)
-			if !m.connecting && i == m.cursor {
+			if (!m.connecting || m.showSubs) && i == m.cursor {
 				row = styleCursor.Render("▶") + row
 			} else {
 				row = " " + row
@@ -198,23 +274,43 @@ func (m model) View() string {
 
 	wrapped := wrapLogEntries(m.logs, m.width-2)
 
-	// Trim oldest entries until content fits in logHeight display lines.
-	for logHeight > 0 {
-		totalLines := 0
-		for _, w := range wrapped {
-			totalLines += strings.Count(w, "\n") + 1
-		}
-		if totalLines <= logHeight || len(wrapped) == 0 {
-			break
-		}
-		wrapped = wrapped[1:]
+	// Flatten wrapped entries into individual display lines.
+	var displayLines []string
+	for _, w := range wrapped {
+		displayLines = append(displayLines, strings.Split(w, "\n")...)
 	}
-	logBlock := styleLog.Render(strings.Join(wrapped, "\n"))
+
+	// Clamp scrollOffset to valid range.
+	total := len(displayLines)
+	offset := m.scrollOffset
+	maxOffset := total - logHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+
+	// Select the visible window (offset lines up from the bottom).
+	end := total - offset
+	start := end - logHeight
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 {
+		end = 0
+	}
+	logBlock := styleLog.Render(strings.Join(displayLines[start:end], "\n"))
 
 	var helpText string
-	if m.connected {
-		helpText = "q: quit"
-	} else {
+	switch {
+	case m.connected && m.showSubs:
+		helpText = "↑/↓: navigate   space: toggle sub   s/Tab: hide subs   q: quit"
+	case m.connected && m.scrollOffset > 0:
+		helpText = fmt.Sprintf("↑/↓/PgUp/PgDn: scroll   G/End: bottom   [+%d lines]   s: subscriptions   q: quit", m.scrollOffset)
+	case m.connected:
+		helpText = "↑/↓/PgUp/PgDn: scroll   s: subscriptions   q: quit"
+	default:
 		helpText = "↑/↓: navigate   space: toggle   enter: connect   q: quit"
 	}
 	help := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(helpText)
@@ -259,6 +355,18 @@ func (m model) connectCmd() tea.Cmd {
 	}
 }
 
+// toggleSubCmd sends sub/unsub for a single subscription while connected.
+func (m model) toggleSubCmd(s subscription) tea.Cmd {
+	return func() tea.Msg {
+		if s.checked {
+			m.radio.Send(fmt.Sprintf("sub %s all", s.name), nil)
+		} else {
+			m.radio.Send(fmt.Sprintf("unsub %s all", s.name), nil)
+		}
+		return nil
+	}
+}
+
 // nextMsg reads one message from ch as a Cmd.
 func nextMsg(ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
@@ -272,6 +380,15 @@ func nextMsg(ch chan tea.Msg) tea.Cmd {
 
 // readLoopCmd fans out status lines into ch and starts draining with nextMsg.
 func readLoopCmd(radio *RadioConn, ch chan tea.Msg) tea.Cmd {
+	radio.OnLog = func(direction, line string) {
+		var text string
+		if direction == "tx" {
+			text = styleTx.Render("→ ") + line
+		} else {
+			text = styleRx.Render("← ") + line
+		}
+		ch <- logLineMsg{text: text}
+	}
 	go func() {
 		err := radio.ReadLoop(func(msg ParsedMessage) {
 			ch <- logLineMsg{text: fmt.Sprintf("%-30s %v", msg.Object, msg.KVs)}

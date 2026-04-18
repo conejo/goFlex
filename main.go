@@ -15,6 +15,7 @@ func main() {
 			subs:   append([]subscription(nil), defaultSubs...),
 		},
 		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 	)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("error: %v\n", err)

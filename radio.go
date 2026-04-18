@@ -21,6 +21,8 @@ type RadioConn struct {
 	Handle    uint32
 	Version   string
 	callbacks map[uint32]func(code int, body string)
+	// OnLog is called (if set) for every sent command and received response.
+	OnLog func(direction, line string)
 }
 
 // Dial opens a TCP connection to the radio and waits for V + H.
@@ -81,10 +83,13 @@ func (rc *RadioConn) Send(command string, cb func(code int, body string)) (uint3
 	if cb != nil {
 		rc.callbacks[seq] = cb
 	}
-	wire := fmt.Sprintf("C%d|%s\n", seq, command)
-	_, err := fmt.Fprint(rc.conn, wire)
+	wire := fmt.Sprintf("C%d|%s", seq, command)
+	_, err := fmt.Fprintf(rc.conn, "%s\n", wire)
 	if err != nil {
 		return 0, fmt.Errorf("send: %w", err)
+	}
+	if rc.OnLog != nil {
+		rc.OnLog("tx", wire)
 	}
 	return seq, nil
 }
@@ -93,9 +98,13 @@ func (rc *RadioConn) Send(command string, cb func(code int, body string)) (uint3
 // Responses are dispatched to registered callbacks; S-lines call onStatus.
 func (rc *RadioConn) ReadLoop(onStatus func(msg ParsedMessage)) error {
 	for rc.scanner.Scan() {
-		msg := parseLine(rc.scanner.Text())
+		raw := rc.scanner.Text()
+		msg := parseLine(raw)
 		switch msg.Type {
 		case MsgResponse:
+			if rc.OnLog != nil {
+				rc.OnLog("rx", raw)
+			}
 			if cb, ok := rc.callbacks[msg.Sequence]; ok {
 				delete(rc.callbacks, msg.Sequence)
 				cb(msg.ResultCode, msg.Object)
