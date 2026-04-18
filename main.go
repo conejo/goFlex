@@ -11,6 +11,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", defaultRadioAddr, "FlexRadio address (host or host:port)")
+	maxLog := flag.Int("log-lines", maxLogLines, "maximum log entries to retain")
 	flag.Parse()
 
 	p := tea.NewProgram(
@@ -18,6 +19,7 @@ func main() {
 			addr:   *addr,
 			status: "Press Enter to connect",
 			subs:   newDefaultSubs(),
+			maxLog: *maxLog,
 		},
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),

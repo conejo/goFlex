@@ -12,7 +12,7 @@ import (
 )
 
 const defaultRadioAddr = "192.168.50.151"
-const maxLogLines = 200
+const maxLogLines = 500
 
 // ─── Tea messages ─────────────────────────────────────────────────────────────
 
@@ -80,6 +80,7 @@ type model struct {
 	cursor       int
 	scrollOffset int  // display lines scrolled up from bottom; 0 = pinned to bottom
 	showSubs     bool // subscription panel visible while connected
+	maxLog       int  // maximum number of log entries to retain
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -97,6 +98,8 @@ var (
 	styleSubLabelDim = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	styleTx          = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))  // blue — outgoing commands
 	styleRx          = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // amber — responses
+	styleScrollbar   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	styleScrollThumb = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
 )
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -115,10 +118,25 @@ func (m model) logHeight() int {
 	return h
 }
 
-// withScrollUp moves the subscription cursor up or scrolls the log up.
+// maxScrollOffset computes the largest valid scrollOffset for the current log content.
+func (m model) maxScrollOffset() int {
+	wrapped := wrapLogEntries(m.logs, m.width-2)
+	var total int
+	for _, w := range wrapped {
+		total += strings.Count(w, "\n") + 1
+	}
+	if max := total - m.logHeight(); max > 0 {
+		return max
+	}
+	return 0
+}
+
+// withScrollUp moves the subscription cursor up or scrolls the log up by one line.
 func (m model) withScrollUp() model {
 	if m.connected && !m.showSubs {
-		m.scrollOffset++
+		if max := m.maxScrollOffset(); m.scrollOffset < max {
+			m.scrollOffset++
+		}
 	} else if !m.connecting && m.cursor > 0 {
 		m.cursor--
 	}
@@ -164,6 +182,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.withScrollDown()
 		case "pgup":
 			m.scrollOffset += m.logHeight()
+			if max := m.maxScrollOffset(); m.scrollOffset > max {
+				m.scrollOffset = max
+			}
 		case "pgdown":
 			m.scrollOffset -= m.logHeight()
 			if m.scrollOffset < 0 {
@@ -214,8 +235,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logLineMsg:
 		m.logs = append(m.logs, msg.text)
-		if len(m.logs) > maxLogLines {
-			m.logs = m.logs[len(m.logs)-maxLogLines:]
+		if len(m.logs) > m.maxLog {
+			m.logs = m.logs[len(m.logs)-m.maxLog:]
+		}
+		// Anchor the viewport: when scrolled up, compensate for the new line
+		// added at the bottom so the visible content doesn't drift downward.
+		if m.scrollOffset > 0 {
+			m.scrollOffset++
 		}
 		return m, nextMsg(m.readCh)
 	}
@@ -270,7 +296,12 @@ func (m model) viewSubsPanel() string {
 
 func (m model) viewLogPane() string {
 	logHeight := m.logHeight()
-	wrapped := wrapLogEntries(m.logs, m.width-2)
+	// Reserve 1 column on the right for the scrollbar.
+	wrapWidth := m.width - 3
+	if wrapWidth < 20 {
+		wrapWidth = 20
+	}
+	wrapped := wrapLogEntries(m.logs, wrapWidth)
 	var displayLines []string
 	for _, w := range wrapped {
 		displayLines = append(displayLines, strings.Split(w, "\n")...)
@@ -292,7 +323,52 @@ func (m model) viewLogPane() string {
 	if end < 0 {
 		end = 0
 	}
-	return styleLog.Render(strings.Join(displayLines[start:end], "\n"))
+	visible := displayLines[start:end]
+
+	// Build scrollbar column.
+	bar := buildScrollbar(logHeight, total, start)
+
+	// Join log lines with scrollbar column.
+	var sb strings.Builder
+	for i, line := range visible {
+		sb.WriteString(line)
+		sb.WriteString(" ")
+		sb.WriteString(bar[i])
+		if i < len(visible)-1 {
+			sb.WriteString("\n")
+		}
+	}
+	return styleLog.Render(sb.String())
+}
+
+// buildScrollbar returns a slice of len `height` single-character strings
+// representing a minimal scrollbar for content of `total` lines, with `start`
+// being the first visible line.
+func buildScrollbar(height, total, start int) []string {
+	bar := make([]string, height)
+	track := styleScrollbar.Render("│")
+	for i := range bar {
+		bar[i] = track
+	}
+	if total <= height {
+		// All content fits — no thumb needed.
+		return bar
+	}
+	// Thumb height proportional to visible fraction, min 1.
+	thumbH := height * height / total
+	if thumbH < 1 {
+		thumbH = 1
+	}
+	// Thumb position: map start → [0, height-thumbH].
+	maxStart := total - height
+	thumbTop := 0
+	if maxStart > 0 {
+		thumbTop = start * (height - thumbH) / maxStart
+	}
+	for i := thumbTop; i < thumbTop+thumbH && i < height; i++ {
+		bar[i] = styleScrollThumb.Render("┃")
+	}
+	return bar
 }
 
 func (m model) viewHelp() string {
