@@ -118,6 +118,7 @@ var (
 	styleRx          = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // amber — responses
 	styleScrollbar   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	styleScrollThumb = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
+	styleRadioItem   = lipgloss.NewStyle().Foreground(lipgloss.Color("255")) // bright white
 )
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -351,7 +352,7 @@ func (m model) viewRadioList() string {
 			statusStyle = styleErr
 		}
 		line := fmt.Sprintf(" %-14s %-16s %s",
-			r.Model, r.Address, statusStyle.Render(r.Status))
+			styleRadioItem.Render(r.Model), styleRadioItem.Render(r.Address), statusStyle.Render(r.Status))
 		if i == m.cursor {
 			line = styleCursor.Render("▶") + line
 		} else {
@@ -479,7 +480,7 @@ func (m model) viewHelp() string {
 	default:
 		text = "↑/↓: navigate   space: toggle   enter: connect   q: quit"
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(text)
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(text)
 }
 
 func (m model) View() string {
