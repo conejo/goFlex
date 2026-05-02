@@ -12,10 +12,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 
+	"goFlex/config"
 	"goFlex/radio"
 )
 
-const defaultRadioAddr = "192.168.50.151"
 const maxLogLines = 500
 
 // ─── Tea messages ─────────────────────────────────────────────────────────────
@@ -104,6 +104,7 @@ type model struct {
 	scrollOffset int  // display lines scrolled up from bottom; 0 = pinned to bottom
 	showSubs     bool // subscription panel visible while connected
 	maxLog       int  // maximum number of log entries to retain
+	cfg        *config.Config
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
