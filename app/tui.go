@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -24,6 +25,10 @@ type connectedMsg struct {
 	errMsg   string
 	initLogs []string
 }
+
+type disconnectedMsg struct{ conn *radio.Conn }
+type reconnectFailedMsg struct{ errMsg string }
+type reconnectSuccessMsg struct{ conn *radio.Conn }
 
 type statusLineMsg struct{ text string }
 type logLineMsg struct{ text string }
@@ -295,8 +300,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logs = append(m.logs, msg.initLogs...)
 			m.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", m.conn.Handle, m.conn.Version)
 			m.readCh = make(chan tea.Msg, 64)
+			m.conn.EnableReconnect()
+			m.conn.OnStateChange = func(oldState, newState radio.ConnectionState) {
+				m.logs = append(m.logs, fmt.Sprintf("[state] %s → %s", oldState, newState))
+			}
+			m.conn.OnPingRtt = func(ms int) {
+				m.logs = append(m.logs, fmt.Sprintf("[ping] RTT %d ms", ms))
+			}
 			return m, readLoopCmd(m.conn, m.readCh)
 		}
+
+	case disconnectedMsg:
+		m.connected = false
+		m.conn = nil
+		m.status = "Disconnected — reconnecting…"
+		m.logs = append(m.logs, "[conn] connection lost, attempting reconnect")
+		return m, reconnectCmd(msg.conn)
+
+	case reconnectFailedMsg:
+		m.status = fmt.Sprintf("Reconnect failed: %s", msg.errMsg)
+		m.logs = append(m.logs, fmt.Sprintf("[conn] reconnect failed: %s", msg.errMsg))
+
+	case reconnectSuccessMsg:
+		m.connected = true
+		m.conn = msg.conn
+		m.status = fmt.Sprintf("Reconnected  handle=0x%X  version=%s", m.conn.Handle, m.conn.Version)
+		m.logs = append(m.logs, "[conn] reconnected successfully")
+		m.readCh = make(chan tea.Msg, 64)
+		return m, readLoopCmd(m.conn, m.readCh)
 
 	case statusLineMsg:
 		m.status = msg.text
@@ -625,11 +656,28 @@ func readLoopCmd(conn *radio.Conn, ch chan tea.Msg) tea.Cmd {
 			ch <- logLineMsg{text: fmt.Sprintf("%-30s %v", msg.Object, msg.KVs)}
 		})
 		if err != nil {
-			ch <- statusLineMsg{text: fmt.Sprintf("disconnected: %v", err)}
+			ch <- disconnectedMsg{conn: conn}
 		} else {
-			ch <- statusLineMsg{text: "Disconnected"}
+			ch <- disconnectedMsg{conn: conn}
 		}
 		close(ch)
 	}()
 	return nextMsg(ch)
+}
+
+// reconnectCmd attempts to re-dial the radio after a disconnect.
+func reconnectCmd(oldConn *radio.Conn) tea.Cmd {
+	return func() tea.Msg {
+		oldConn.OnDisconnected()
+		// Wait for the reconnect timer to fire and attempt a new connection.
+		// The Conn's OnDisconnected schedules the re-dial internally.
+		// We poll briefly to see if a new connection was established.
+		for i := 0; i < 60; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if oldConn.State() == radio.StateConnected {
+				return reconnectSuccessMsg{conn: oldConn}
+			}
+		}
+		return reconnectFailedMsg{errMsg: "timeout waiting for reconnect"}
+	}
 }
