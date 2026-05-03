@@ -27,7 +27,6 @@ func Run() {
 			addr:   fmt.Sprintf("%s:%d", cfg.RadioAddress, cfg.RadioPort),
 		},
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 	)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("error: %v\n", err)

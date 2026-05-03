@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ type reconnectSuccessMsg struct{ conn *radio.Conn }
 
 type statusLineMsg struct{ text string }
 type logLineMsg struct{ text string }
+type freqSetMsg struct{ freqHz uint64 }
 
 type discoveryStartedMsg struct {
 	ch     chan tea.Msg
@@ -98,6 +100,10 @@ type model struct {
 	logs         []string
 	height       int
 	width        int
+
+	// Frequency input
+	settingFreq bool   // true when typing a frequency
+	freqInput   string // e.g. "14.300"
 	readCh       chan tea.Msg
 	subs         []subscription
 	cursor       int
@@ -199,6 +205,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 
 	case tea.KeyMsg:
+		// Frequency input mode takes precedence.
+		if m.settingFreq {
+			switch msg.String() {
+			case "esc", "ctrl+c":
+				m.settingFreq = false
+				m.freqInput = ""
+			case "enter":
+				m.settingFreq = false
+				freqStr := m.freqInput
+				m.freqInput = ""
+				if freqStr != "" && m.conn != nil {
+					return m, setFreqCmd(m.conn, freqStr)
+				}
+			case "backspace":
+				if len(m.freqInput) > 0 {
+					m.freqInput = m.freqInput[:len(m.freqInput)-1]
+				}
+			default:
+				// Accept digits and one decimal point.
+				if len(msg.String()) == 1 {
+					ch := msg.String()[0]
+					if (ch >= '0' && ch <= '9') || ch == '.' {
+						m.freqInput += string(ch)
+					}
+				}
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			if m.conn != nil {
@@ -211,6 +246,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s", "tab":
 			if m.connected {
 				m.showSubs = !m.showSubs
+			}
+		case "f":
+			if m.connected && m.conn != nil {
+				m.settingFreq = true
+				m.freqInput = ""
 			}
 		case "up", "k":
 			m = m.withScrollUp()
@@ -371,6 +411,18 @@ func (m model) viewHeader() string {
 	return lipgloss.JoinHorizontal(lipgloss.Center, btn, "  ", statusText)
 }
 
+func (m model) viewFreqPrompt() string {
+	if !m.settingFreq {
+		return ""
+	}
+	prompt := fmt.Sprintf("Set frequency (MHz): %s", m.freqInput)
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color("63")).
+		Foreground(lipgloss.Color("230")).
+		Padding(0, 1).
+		Render(prompt)
+}
+
 func (m model) viewRadioList() string {
 	if len(m.radios) == 0 {
 		return styleSubLabelDim.Render("  Scanning for radios…")
@@ -506,9 +558,9 @@ func (m model) viewHelp() string {
 	case m.connected && m.showSubs:
 		text = "↑/↓: navigate   space: toggle sub   s/Tab: hide subs   q: quit"
 	case m.connected && m.scrollOffset > 0:
-		text = fmt.Sprintf("↑/↓/PgUp/PgDn: scroll   G/End: bottom   [+%d lines]   s: subscriptions   q: quit", m.scrollOffset)
+		text = fmt.Sprintf("↑/↓/PgUp/PgDn: scroll   G/End: bottom   [+%d lines]   f: set freq   s: subscriptions   q: quit", m.scrollOffset)
 	case m.connected:
-		text = "↑/↓/PgUp/PgDn: scroll   s: subscriptions   q: quit"
+		text = "↑/↓/PgUp/PgDn: scroll   f: set freq   s: subscriptions   q: quit"
 	default:
 		text = "↑/↓: navigate   space: toggle   enter: connect   q: quit"
 	}
@@ -524,8 +576,14 @@ func (m model) View() string {
 			m.viewHelp(),
 		}, "\n")
 	}
+	var header string
+	if m.settingFreq {
+		header = m.viewHeader() + "\n" + m.viewFreqPrompt() + "\n" + sep
+	} else {
+		header = m.viewHeader() + m.viewSubsPanel() + sep
+	}
 	return strings.Join([]string{
-		m.viewHeader() + m.viewSubsPanel() + sep,
+		header,
 		m.viewLogPane(),
 		m.viewHelp(),
 	}, "\n")
@@ -582,6 +640,43 @@ func toggleSubCmd(conn *radio.Conn, s subscription) tea.Cmd {
 			conn.Send(fmt.Sprintf("unsub %s all", s.name), nil)
 		}
 		return nil
+	}
+}
+
+// parseFreqMHz converts a string like "14.300" (MHz) to Hz.
+func parseFreqMHz(freqStr string) (uint64, error) {
+	mhz, err := strconv.ParseFloat(freqStr, 64)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(mhz * 1e6), nil
+}
+
+// parseFreqMHzFloat converts a string like "14.300" (MHz) to a float64 MHz value.
+func parseFreqMHzFloat(freqStr string) (float64, error) {
+	return strconv.ParseFloat(freqStr, 64)
+}
+
+// setFreqCmd parses a frequency string like "14.300" (MHz) and sends the
+// corresponding "slice tune" command.
+//
+// AetherSDR uses:  slice tune <id> <freq_mhz> autopan=0
+//   • Frequency is sent in MHz (not Hz).
+//   • autopan=0 prevents the radio from recentering the panadapter.
+func setFreqCmd(conn *radio.Conn, freqStr string) tea.Cmd {
+	return func() tea.Msg {
+		mhz, err := strconv.ParseFloat(freqStr, 64)
+		if err != nil {
+			return logLineMsg{text: fmt.Sprintf("[freq] invalid frequency: %s", freqStr)}
+		}
+		// Target slice 0 (first slice) with 6-decimal precision.
+		cmd := fmt.Sprintf("slice tune 0 %.6f autopan=0", mhz)
+		conn.Send(cmd, func(code int, body string) {
+			if code != 0 {
+				// non-zero code means error — radio rejected the tune
+			}
+		})
+		return logLineMsg{text: fmt.Sprintf("[freq] set %.6f MHz  →  %s", mhz, cmd)}
 	}
 }
 
