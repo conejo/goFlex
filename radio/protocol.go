@@ -53,6 +53,31 @@ func ParseKVs(body string) map[string]string {
 	return kvs
 }
 
+// ParseCommaKVs splits a comma-separated "key=val,key2=val2" string into a map.
+// Values may be quoted with double quotes; quotes are stripped.
+func ParseCommaKVs(body string) map[string]string {
+	kvs := make(map[string]string)
+	for _, token := range strings.Split(body, ",") {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		eq := strings.IndexByte(token, '=')
+		if eq < 0 {
+			kvs[token] = ""
+			continue
+		}
+		key := strings.TrimSpace(token[:eq])
+		val := strings.TrimSpace(token[eq+1:])
+		// Strip surrounding quotes if present
+		if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+			val = val[1 : len(val)-1]
+		}
+		kvs[key] = val
+	}
+	return kvs
+}
+
 // ParseLine parses one newline-terminated line from the radio.
 func ParseLine(raw string) ParsedMessage {
 	raw = strings.TrimSpace(raw)

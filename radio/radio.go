@@ -12,6 +12,7 @@ package radio
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -220,6 +221,57 @@ func (rc *Conn) ReadLoop(onStatus func(ParsedMessage)) error {
 		}
 	}
 	return rc.scanner.Err()
+}
+
+// RegisterClient registers this connection as a GUI client.
+func (rc *Conn) RegisterClient(ctx context.Context, clientID string) error {
+	done := make(chan struct{})
+	_, err := rc.Send(fmt.Sprintf("client gui %s", clientID), func(code int, body string) {
+		close(done)
+	})
+	if err != nil {
+		return err
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// SubscribeSlices subscribes to all slice status updates.
+func (rc *Conn) SubscribeSlices(ctx context.Context) error {
+	done := make(chan struct{})
+	_, err := rc.Send("sub slice all", func(code int, body string) {
+		close(done)
+	})
+	if err != nil {
+		return err
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// UnsubscribeSlices unsubscribes from all slice status updates.
+func (rc *Conn) UnsubscribeSlices(ctx context.Context) error {
+	done := make(chan struct{})
+	_, err := rc.Send("unsub slice all", func(code int, body string) {
+		close(done)
+	})
+	if err != nil {
+		return err
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ─── Heartbeat ──────────────────────────────────────────────────────────────

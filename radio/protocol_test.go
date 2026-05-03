@@ -85,6 +85,34 @@ func TestParseKVs(t *testing.T) {
 	}
 }
 
+func TestParseCommaKVs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want map[string]string
+	}{
+		{"empty", "", map[string]string{}},
+		{"simple", "key=val", map[string]string{"key": "val"}},
+		{"multiple", "key=val,key2=val2", map[string]string{"key": "val", "key2": "val2"}},
+		{"quoted", `key="val"`, map[string]string{"key": "val"}},
+		{"mixed quoted", `key="val",key2=val2`, map[string]string{"key": "val", "key2": "val2"}},
+		{"spaces", "key = val , key2 = val2", map[string]string{"key": "val", "key2": "val2"}},
+		{"no value", "key", map[string]string{"key": ""}},
+		{"empty value", "key=", map[string]string{"key": ""}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ParseCommaKVs(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("want %v, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestParseLine_RealWorldExamples(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
