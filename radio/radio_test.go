@@ -403,8 +403,8 @@ func TestReadLoop_StatusDispatch(t *testing.T) {
 		t.Fatalf("ReadLoop: %v", err)
 	}
 
-	if gotMsg.Type != msgStatus {
-		t.Fatalf("type: want msgStatus, got %v", gotMsg.Type)
+	if gotMsg.Type != MsgStatus {
+		t.Fatalf("type: want MsgStatus, got %v", gotMsg.Type)
 	}
 	if gotMsg.Object != "slice 0" {
 		t.Fatalf("object: want %q, got %q", "slice 0", gotMsg.Object)
@@ -426,9 +426,9 @@ func TestReadLoop_PingReply(t *testing.T) {
 	c.pingSeq = 1
 	c.pingSent = time.Now().Add(-50 * time.Millisecond)
 
-	msg := parseLine("R1|0|\n")
-	if msg.Type != msgResponse || msg.Sequence != 1 {
-		t.Fatalf("parseLine failed: %+v", msg)
+	msg := ParseLine("R1|0|\n")
+	if msg.Type != MsgResponse || msg.Sequence != 1 {
+		t.Fatalf("ParseLine failed: %+v", msg)
 	}
 
 	// Inline the ping-reply handling from ReadLoop.

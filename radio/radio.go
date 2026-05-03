@@ -12,6 +12,7 @@ package radio
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -21,9 +22,9 @@ import (
 )
 
 const (
-	defaultPort          = 4992
-	heartbeatInterval    = 30 * time.Second
-	pingTimeout          = 5 * time.Second
+	defaultPort           = 4992
+	heartbeatInterval     = 30 * time.Second
+	pingTimeout           = 5 * time.Second
 	reconnectInitialDelay = 1 * time.Second
 	reconnectMaxDelay     = 30 * time.Second
 )
@@ -73,8 +74,8 @@ type Conn struct {
 	// successful heartbeat ping.
 	OnPingRtt func(ms int)
 
-	state   atomic.Int32 // stores ConnectionState
-	addr    string       // last dial address, used for reconnect
+	state atomic.Int32 // stores ConnectionState
+	addr  string       // last dial address, used for reconnect
 
 	// heartbeat
 	heartbeatTimer *time.Timer
@@ -88,8 +89,8 @@ type Conn struct {
 	reconnectStopCh chan struct{}
 
 	// graceful disconnect
-	gracefulMu     sync.Mutex
-	gracefulClose  bool
+	gracefulMu    sync.Mutex
+	gracefulClose bool
 }
 
 // Dial opens a TCP connection to the radio and waits for the V + H handshake.
@@ -111,9 +112,9 @@ func Dial(address string) (*Conn, error) {
 	}
 
 	rc := &Conn{
-		conn:          c,
-		scanner:       bufio.NewScanner(c),
-		callbacks:     make(map[uint32]func(int, string)),
+		conn:            c,
+		scanner:         bufio.NewScanner(c),
+		callbacks:       make(map[uint32]func(int, string)),
 		addr:            addr,
 		reconnectStopCh: make(chan struct{}),
 	}
@@ -147,12 +148,12 @@ func (rc *Conn) readHandshake() error {
 	gotVersion := false
 	gotHandle := false
 	for rc.scanner.Scan() {
-		msg := parseLine(rc.scanner.Text())
+		msg := ParseLine(rc.scanner.Text())
 		switch msg.Type {
-		case msgVersion:
+		case MsgVersion:
 			rc.Version = msg.Object
 			gotVersion = true
-		case msgHandle:
+		case MsgHandle:
 			rc.Handle = msg.Handle
 			gotHandle = true
 		}
@@ -190,9 +191,9 @@ func (rc *Conn) Send(command string, cb func(code int, body string)) (uint32, er
 func (rc *Conn) ReadLoop(onStatus func(ParsedMessage)) error {
 	for rc.scanner.Scan() {
 		raw := rc.scanner.Text()
-		msg := parseLine(raw)
+		msg := ParseLine(raw)
 		switch msg.Type {
-		case msgResponse:
+		case MsgResponse:
 			// Check for ping reply first.
 			if msg.Sequence == rc.pingSeq && rc.pingSeq != 0 {
 				rtt := int(time.Since(rc.pingSent).Milliseconds())
@@ -213,13 +214,64 @@ func (rc *Conn) ReadLoop(onStatus func(ParsedMessage)) error {
 			} else {
 				rc.cbMu.Unlock()
 			}
-		case msgStatus:
+		case MsgStatus:
 			if onStatus != nil {
 				onStatus(msg)
 			}
 		}
 	}
 	return rc.scanner.Err()
+}
+
+// RegisterClient registers this connection as a GUI client.
+func (rc *Conn) RegisterClient(ctx context.Context, clientID string) error {
+	done := make(chan struct{})
+	_, err := rc.Send(fmt.Sprintf("client gui %s", clientID), func(code int, body string) {
+		close(done)
+	})
+	if err != nil {
+		return err
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// SubscribeSlices subscribes to all slice status updates.
+func (rc *Conn) SubscribeSlices(ctx context.Context) error {
+	done := make(chan struct{})
+	_, err := rc.Send("sub slice all", func(code int, body string) {
+		close(done)
+	})
+	if err != nil {
+		return err
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// UnsubscribeSlices unsubscribes from all slice status updates.
+func (rc *Conn) UnsubscribeSlices(ctx context.Context) error {
+	done := make(chan struct{})
+	_, err := rc.Send("unsub slice all", func(code int, body string) {
+		close(done)
+	})
+	if err != nil {
+		return err
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ─── Heartbeat ──────────────────────────────────────────────────────────────

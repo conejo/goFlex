@@ -14,31 +14,31 @@ func TestParseLine(t *testing.T) {
 		line string
 		want ParsedMessage
 	}{
-		{"version", "V3.3.28.0", ParsedMessage{Type: msgVersion, Object: "3.3.28.0"}},
-		{"handle", "H0A1B2C3D", ParsedMessage{Type: msgHandle, Handle: 0x0A1B2C3D}},
-		{"response OK", "R1|0|", ParsedMessage{Type: msgResponse, Sequence: 1, ResultCode: 0, Object: "", KVs: map[string]string{}}},
-		{"response error", "R2|50001001|No Such Object", ParsedMessage{Type: msgResponse, Sequence: 2, ResultCode: 0x50001001, Object: "No Such Object", KVs: map[string]string{"No": "", "Such": "", "Object": ""}}},
-		{"response with KVs", "R3|0|freq=14.225000 mode=USB", ParsedMessage{Type: msgResponse, Sequence: 3, ResultCode: 0, Object: "freq=14.225000 mode=USB", KVs: map[string]string{"freq": "14.225000", "mode": "USB"}}},
-		{"status simple", "S0A1B2C3D|slice 0 freq=14.225000 mode=USB", ParsedMessage{Type: msgStatus, Handle: 0x0A1B2C3D, Object: "slice 0", KVs: map[string]string{"freq": "14.225000", "mode": "USB"}}},
-		{"status multi-word object", "S0A1B2C3D|display pan 0x40000000 x=100 y=200", ParsedMessage{Type: msgStatus, Handle: 0x0A1B2C3D, Object: "display pan 0x40000000", KVs: map[string]string{"x": "100", "y": "200"}}},
-		{"status no KVs", "S0A1B2C3D|slice 0 removed", ParsedMessage{Type: msgStatus, Handle: 0x0A1B2C3D, Object: "slice 0 removed"}},
-		{"status only KVs", "S0A1B2C3D|freq=14.225000 mode=USB", ParsedMessage{Type: msgStatus, Handle: 0x0A1B2C3D, Object: "", KVs: map[string]string{"freq": "14.225000", "mode": "USB"}}},
-		{"status empty body", "S0A1B2C3D|", ParsedMessage{Type: msgStatus, Handle: 0x0A1B2C3D}},
-		{"status no pipe", "S0A1B2C3D slice 0 freq=14.225000", ParsedMessage{Type: msgStatus}},
-		{"empty line", "", ParsedMessage{Type: msgUnknown, Raw: ""}},
-		{"whitespace only", "   \t\n  ", ParsedMessage{Type: msgUnknown, Raw: ""}},
-		{"unknown tag", "Xsome random data", ParsedMessage{Type: msgUnknown, Raw: "Xsome random data"}},
-		{"version with spaces", "  V3.3.28.0  ", ParsedMessage{Type: msgVersion, Object: "3.3.28.0"}},
-		{"handle lowercase", "H0a1b2c3d", ParsedMessage{Type: msgHandle, Handle: 0x0A1B2C3D}},
-		{"response negative code", "R1|FFFFFFFF|Error", ParsedMessage{Type: msgResponse, Sequence: 1, ResultCode: 2147483647, Object: "Error", KVs: map[string]string{"Error": ""}}},
-		{"status negative values", "S0A1B2C3D|slice 0 filter_lo=-1500 filter_hi=1500", ParsedMessage{Type: msgStatus, Handle: 0x0A1B2C3D, Object: "slice 0", KVs: map[string]string{"filter_lo": "-1500", "filter_hi": "1500"}}},
-		{"status equals in value", "S0A1B2C3D|slice 0 mysetting=a=b=c", ParsedMessage{Type: msgStatus, Handle: 0x0A1B2C3D, Object: "slice 0", KVs: map[string]string{"mysetting": "a=b=c"}}},
+		{"version", "V3.3.28.0", ParsedMessage{Type: MsgVersion, Object: "3.3.28.0"}},
+		{"handle", "H0A1B2C3D", ParsedMessage{Type: MsgHandle, Handle: 0x0A1B2C3D}},
+		{"response OK", "R1|0|", ParsedMessage{Type: MsgResponse, Sequence: 1, ResultCode: 0, Object: "", KVs: map[string]string{}}},
+		{"response error", "R2|50001001|No Such Object", ParsedMessage{Type: MsgResponse, Sequence: 2, ResultCode: 0x50001001, Object: "No Such Object", KVs: map[string]string{"No": "", "Such": "", "Object": ""}}},
+		{"response with KVs", "R3|0|freq=14.225000 mode=USB", ParsedMessage{Type: MsgResponse, Sequence: 3, ResultCode: 0, Object: "freq=14.225000 mode=USB", KVs: map[string]string{"freq": "14.225000", "mode": "USB"}}},
+		{"status simple", "S0A1B2C3D|slice 0 freq=14.225000 mode=USB", ParsedMessage{Type: MsgStatus, Handle: 0x0A1B2C3D, Object: "slice 0", KVs: map[string]string{"freq": "14.225000", "mode": "USB"}}},
+		{"status multi-word object", "S0A1B2C3D|display pan 0x40000000 x=100 y=200", ParsedMessage{Type: MsgStatus, Handle: 0x0A1B2C3D, Object: "display pan 0x40000000", KVs: map[string]string{"x": "100", "y": "200"}}},
+		{"status no KVs", "S0A1B2C3D|slice 0 removed", ParsedMessage{Type: MsgStatus, Handle: 0x0A1B2C3D, Object: "slice 0 removed"}},
+		{"status only KVs", "S0A1B2C3D|freq=14.225000 mode=USB", ParsedMessage{Type: MsgStatus, Handle: 0x0A1B2C3D, Object: "", KVs: map[string]string{"freq": "14.225000", "mode": "USB"}}},
+		{"status empty body", "S0A1B2C3D|", ParsedMessage{Type: MsgStatus, Handle: 0x0A1B2C3D}},
+		{"status no pipe", "S0A1B2C3D slice 0 freq=14.225000", ParsedMessage{Type: MsgStatus}},
+		{"empty line", "", ParsedMessage{Type: MsgUnknown, Raw: ""}},
+		{"whitespace only", "   \t\n  ", ParsedMessage{Type: MsgUnknown, Raw: ""}},
+		{"unknown tag", "Xsome random data", ParsedMessage{Type: MsgUnknown, Raw: "Xsome random data"}},
+		{"version with spaces", "  V3.3.28.0  ", ParsedMessage{Type: MsgVersion, Object: "3.3.28.0"}},
+		{"handle lowercase", "H0a1b2c3d", ParsedMessage{Type: MsgHandle, Handle: 0x0A1B2C3D}},
+		{"response negative code", "R1|FFFFFFFF|Error", ParsedMessage{Type: MsgResponse, Sequence: 1, ResultCode: 2147483647, Object: "Error", KVs: map[string]string{"Error": ""}}},
+		{"status negative values", "S0A1B2C3D|slice 0 filter_lo=-1500 filter_hi=1500", ParsedMessage{Type: MsgStatus, Handle: 0x0A1B2C3D, Object: "slice 0", KVs: map[string]string{"filter_lo": "-1500", "filter_hi": "1500"}}},
+		{"status equals in value", "S0A1B2C3D|slice 0 mysetting=a=b=c", ParsedMessage{Type: MsgStatus, Handle: 0x0A1B2C3D, Object: "slice 0", KVs: map[string]string{"mysetting": "a=b=c"}}},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := parseLine(tc.line)
+			got := ParseLine(tc.line)
 			if got.Type != tc.want.Type {
 				t.Fatalf("Type: want %v, got %v", tc.want.Type, got.Type)
 			}
@@ -77,7 +77,35 @@ func TestParseKVs(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := parseKVs(tc.in)
+			got := ParseKVs(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("want %v, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestParseCommaKVs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want map[string]string
+	}{
+		{"empty", "", map[string]string{}},
+		{"simple", "key=val", map[string]string{"key": "val"}},
+		{"multiple", "key=val,key2=val2", map[string]string{"key": "val", "key2": "val2"}},
+		{"quoted", `key="val"`, map[string]string{"key": "val"}},
+		{"mixed quoted", `key="val",key2=val2`, map[string]string{"key": "val", "key2": "val2"}},
+		{"spaces", "key = val , key2 = val2", map[string]string{"key": "val", "key2": "val2"}},
+		{"no value", "key", map[string]string{"key": ""}},
+		{"empty value", "key=", map[string]string{"key": ""}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ParseCommaKVs(tc.in)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("want %v, got %v", tc.want, got)
 			}
@@ -91,19 +119,19 @@ func TestParseLine_RealWorldExamples(t *testing.T) {
 		line string
 		want ParsedMessage
 	}{
-		{"V3.4.24.0", ParsedMessage{Type: msgVersion, Object: "3.4.24.0"}},
-		{"H00000001", ParsedMessage{Type: msgHandle, Handle: 1}},
-		{"R42|0|", ParsedMessage{Type: msgResponse, Sequence: 42, ResultCode: 0, KVs: map[string]string{}}},
-		{"S00000001|slice 0 RF_frequency=14.225000", ParsedMessage{Type: msgStatus, Handle: 1, Object: "slice 0", KVs: map[string]string{"RF_frequency": "14.225000"}}},
-		{"S00000001|display pan 0x40000000 min_db=-130 max_db=0", ParsedMessage{Type: msgStatus, Handle: 1, Object: "display pan 0x40000000", KVs: map[string]string{"min_db": "-130", "max_db": "0"}}},
-		{"S00000001|radio ptt=1", ParsedMessage{Type: msgStatus, Handle: 1, Object: "radio", KVs: map[string]string{"ptt": "1"}}},
-		{"S00000001|meter 0 name=SWR value=1.5", ParsedMessage{Type: msgStatus, Handle: 1, Object: "meter 0", KVs: map[string]string{"name": "SWR", "value": "1.5"}}},
+		{"V3.4.24.0", ParsedMessage{Type: MsgVersion, Object: "3.4.24.0"}},
+		{"H00000001", ParsedMessage{Type: MsgHandle, Handle: 1}},
+		{"R42|0|", ParsedMessage{Type: MsgResponse, Sequence: 42, ResultCode: 0, KVs: map[string]string{}}},
+		{"S00000001|slice 0 RF_frequency=14.225000", ParsedMessage{Type: MsgStatus, Handle: 1, Object: "slice 0", KVs: map[string]string{"RF_frequency": "14.225000"}}},
+		{"S00000001|display pan 0x40000000 min_db=-130 max_db=0", ParsedMessage{Type: MsgStatus, Handle: 1, Object: "display pan 0x40000000", KVs: map[string]string{"min_db": "-130", "max_db": "0"}}},
+		{"S00000001|radio ptt=1", ParsedMessage{Type: MsgStatus, Handle: 1, Object: "radio", KVs: map[string]string{"ptt": "1"}}},
+		{"S00000001|meter 0 name=SWR value=1.5", ParsedMessage{Type: MsgStatus, Handle: 1, Object: "meter 0", KVs: map[string]string{"name": "SWR", "value": "1.5"}}},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.line, func(t *testing.T) {
 			t.Parallel()
-			got := parseLine(tc.line)
+			got := ParseLine(tc.line)
 			if got.Type != tc.want.Type {
 				t.Fatalf("Type: want %v, got %v", tc.want.Type, got.Type)
 			}

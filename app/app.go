@@ -10,14 +10,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Run starts the Bubble Tea TUI.
-func Run() {
+// Run starts the Bubble Tea TUI using the default config loader.
+func Run() error {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Printf("config error: %v\n", err)
-		return
+		return fmt.Errorf("config error: %w", err)
 	}
+	return RunWithConfig(cfg)
+}
 
+// RunWithConfig starts the Bubble Tea TUI with the provided config.
+func RunWithConfig(cfg *config.Config) error {
 	p := tea.NewProgram(
 		model{
 			status: "Scanning for radios…",
@@ -29,6 +32,7 @@ func Run() {
 		tea.WithAltScreen(),
 	)
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("error: %v\n", err)
+		return fmt.Errorf("error: %w", err)
 	}
+	return nil
 }
