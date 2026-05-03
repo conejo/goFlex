@@ -3,9 +3,9 @@
 package main
 
 import (
-	"goFlex/app"
+	"goFlex/cmd"
 )
 
 func main() {
-	app.Run()
+	cmd.Execute()
 }

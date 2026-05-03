@@ -21,11 +21,11 @@ import (
 type msgType int
 
 const (
-	msgUnknown  msgType = iota
-	msgVersion          // V<version>
-	msgHandle           // H<hex-handle>
-	msgResponse         // R<seq>|<code>|<body>
-	msgStatus           // S<handle>|<obj> k=v …
+	MsgUnknown  msgType = iota
+	MsgVersion          // V<version>
+	MsgHandle           // H<hex-handle>
+	MsgResponse         // R<seq>|<code>|<body>
+	MsgStatus           // S<handle>|<obj> k=v …
 )
 
 // ParsedMessage is the result of parsing one line received from the radio.
@@ -39,8 +39,8 @@ type ParsedMessage struct {
 	KVs        map[string]string // key=value pairs from status/response body
 }
 
-// parseKVs splits "key=val key2=val2" into a map.
-func parseKVs(body string) map[string]string {
+// ParseKVs splits "key=val key2=val2" into a map.
+func ParseKVs(body string) map[string]string {
 	kvs := make(map[string]string)
 	for _, token := range strings.Fields(body) {
 		eq := strings.IndexByte(token, '=')
@@ -53,8 +53,8 @@ func parseKVs(body string) map[string]string {
 	return kvs
 }
 
-// parseLine parses one newline-terminated line from the radio.
-func parseLine(raw string) ParsedMessage {
+// ParseLine parses one newline-terminated line from the radio.
+func ParseLine(raw string) ParsedMessage {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ParsedMessage{Raw: raw}
@@ -65,15 +65,15 @@ func parseLine(raw string) ParsedMessage {
 
 	switch raw[0] {
 	case 'V':
-		msg.Type = msgVersion
+		msg.Type = MsgVersion
 		msg.Object = body
 
 	case 'H':
-		msg.Type = msgHandle
+		msg.Type = MsgHandle
 		msg.Handle = atohex(body)
 
 	case 'R':
-		msg.Type = msgResponse
+		msg.Type = MsgResponse
 		parts := strings.SplitN(body, "|", 3)
 		msg.Sequence = atoui(parts[0])
 		if len(parts) > 1 {
@@ -81,11 +81,11 @@ func parseLine(raw string) ParsedMessage {
 		}
 		if len(parts) > 2 {
 			msg.Object = parts[2]
-			msg.KVs = parseKVs(parts[2])
+			msg.KVs = ParseKVs(parts[2])
 		}
 
 	case 'S':
-		msg.Type = msgStatus
+		msg.Type = MsgStatus
 		parts := strings.SplitN(body, "|", 2)
 		if len(parts) < 2 {
 			break
@@ -124,7 +124,7 @@ func parseStatusBody(body string) (object string, kvs map[string]string) {
 	}
 	split := strings.LastIndexByte(body[:eq], ' ')
 	if split < 0 {
-		return "", parseKVs(body)
+		return "", ParseKVs(body)
 	}
-	return strings.TrimSpace(body[:split]), parseKVs(body[split+1:])
+	return strings.TrimSpace(body[:split]), ParseKVs(body[split+1:])
 }
