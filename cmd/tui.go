@@ -18,11 +18,7 @@ var tuiCmd = &cobra.Command{
 	Short: "Start the interactive terminal UI",
 	Long:  `Launch the Bubble Tea TUI for discovering and connecting to FlexRadio devices.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cfg := &config.Config{
-			RadioAddress: viper.GetString("radio-address"),
-			RadioPort:    viper.GetInt("radio-port"),
-			MaxLog:       viper.GetInt("max-log"),
-		}
+		cfg := config.FromViper(viper.GetViper())
 		if err := app.RunWithConfig(cfg); err != nil {
 			fmt.Printf("error: %v\n", err)
 		}

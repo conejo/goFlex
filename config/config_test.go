@@ -27,14 +27,14 @@ func TestLoad_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.RadioAddress != defaultRadioAddr {
-		t.Fatalf("RadioAddress: want %q, got %q", defaultRadioAddr, cfg.RadioAddress)
+	if cfg.RadioAddress != DefaultRadioAddr {
+		t.Fatalf("RadioAddress: want %q, got %q", DefaultRadioAddr, cfg.RadioAddress)
 	}
-	if cfg.RadioPort != defaultRadioPort {
-		t.Fatalf("RadioPort: want %d, got %d", defaultRadioPort, cfg.RadioPort)
+	if cfg.RadioPort != DefaultRadioPort {
+		t.Fatalf("RadioPort: want %d, got %d", DefaultRadioPort, cfg.RadioPort)
 	}
-	if cfg.MaxLog != defaultMaxLog {
-		t.Fatalf("MaxLog: want %d, got %d", defaultMaxLog, cfg.MaxLog)
+	if cfg.MaxLog != DefaultMaxLog {
+		t.Fatalf("MaxLog: want %d, got %d", DefaultMaxLog, cfg.MaxLog)
 	}
 }
 
@@ -163,14 +163,14 @@ func TestLoad_PartialEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.RadioAddress != defaultRadioAddr {
-		t.Fatalf("RadioAddress: want %q, got %q", defaultRadioAddr, cfg.RadioAddress)
+	if cfg.RadioAddress != DefaultRadioAddr {
+		t.Fatalf("RadioAddress: want %q, got %q", DefaultRadioAddr, cfg.RadioAddress)
 	}
 	if cfg.RadioPort != 6000 {
 		t.Fatalf("RadioPort: want %d, got %d", 6000, cfg.RadioPort)
 	}
-	if cfg.MaxLog != defaultMaxLog {
-		t.Fatalf("MaxLog: want %d, got %d", defaultMaxLog, cfg.MaxLog)
+	if cfg.MaxLog != DefaultMaxLog {
+		t.Fatalf("MaxLog: want %d, got %d", DefaultMaxLog, cfg.MaxLog)
 	}
 }
 
@@ -186,13 +186,13 @@ func TestLoad_EmptyEnvVars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.RadioAddress != defaultRadioAddr {
-		t.Fatalf("RadioAddress: want %q, got %q", defaultRadioAddr, cfg.RadioAddress)
+	if cfg.RadioAddress != DefaultRadioAddr {
+		t.Fatalf("RadioAddress: want %q, got %q", DefaultRadioAddr, cfg.RadioAddress)
 	}
-	if cfg.RadioPort != defaultRadioPort {
-		t.Fatalf("RadioPort: want %d, got %d", defaultRadioPort, cfg.RadioPort)
+	if cfg.RadioPort != DefaultRadioPort {
+		t.Fatalf("RadioPort: want %d, got %d", DefaultRadioPort, cfg.RadioPort)
 	}
-	if cfg.MaxLog != defaultMaxLog {
-		t.Fatalf("MaxLog: want %d, got %d", defaultMaxLog, cfg.MaxLog)
+	if cfg.MaxLog != DefaultMaxLog {
+		t.Fatalf("MaxLog: want %d, got %d", DefaultMaxLog, cfg.MaxLog)
 	}
 }

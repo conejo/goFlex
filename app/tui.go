@@ -27,7 +27,10 @@ type connectedMsg struct {
 	initLogs []string
 }
 
-type disconnectedMsg struct{ conn *radio.Conn }
+type disconnectedMsg struct {
+	conn *radio.Conn
+	err  error // non-nil if the disconnect was due to an error
+}
 type reconnectFailedMsg struct{ errMsg string }
 type reconnectSuccessMsg struct{ conn *radio.Conn }
 
@@ -95,22 +98,22 @@ type model struct {
 	connecting bool
 	conn       *radio.Conn
 
-	errMsg       string
-	status       string
-	logs         []string
-	height       int
-	width        int
+	errMsg string
+	status string
+	logs   []string
+	height int
+	width  int
 
 	// Frequency input
-	settingFreq bool   // true when typing a frequency
-	freqInput   string // e.g. "14.300"
+	settingFreq  bool   // true when typing a frequency
+	freqInput    string // e.g. "14.300"
 	readCh       chan tea.Msg
 	subs         []subscription
 	cursor       int
 	scrollOffset int  // display lines scrolled up from bottom; 0 = pinned to bottom
 	showSubs     bool // subscription panel visible while connected
 	maxLog       int  // maximum number of log entries to retain
-	cfg        *config.Config
+	cfg          *config.Config
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -355,7 +358,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connected = false
 		m.conn = nil
 		m.status = "Disconnected — reconnecting…"
-		m.logs = append(m.logs, "[conn] connection lost, attempting reconnect")
+		if msg.err != nil {
+			m.logs = append(m.logs, fmt.Sprintf("[conn] connection lost: %v", msg.err))
+		} else {
+			m.logs = append(m.logs, "[conn] connection lost, attempting reconnect")
+		}
 		return m, reconnectCmd(msg.conn)
 
 	case reconnectFailedMsg:
@@ -661,8 +668,8 @@ func parseFreqMHzFloat(freqStr string) (float64, error) {
 // corresponding "slice tune" command.
 //
 // AetherSDR uses:  slice tune <id> <freq_mhz> autopan=0
-//   • Frequency is sent in MHz (not Hz).
-//   • autopan=0 prevents the radio from recentering the panadapter.
+//   - Frequency is sent in MHz (not Hz).
+//   - autopan=0 prevents the radio from recentering the panadapter.
 func setFreqCmd(conn *radio.Conn, freqStr string) tea.Cmd {
 	return func() tea.Msg {
 		mhz, err := strconv.ParseFloat(freqStr, 64)
@@ -751,11 +758,7 @@ func readLoopCmd(conn *radio.Conn, ch chan tea.Msg) tea.Cmd {
 		err := conn.ReadLoop(func(msg radio.ParsedMessage) {
 			ch <- logLineMsg{text: fmt.Sprintf("%-30s %v", msg.Object, msg.KVs)}
 		})
-		if err != nil {
-			ch <- disconnectedMsg{conn: conn}
-		} else {
-			ch <- disconnectedMsg{conn: conn}
-		}
+		ch <- disconnectedMsg{conn: conn, err: err}
 		close(ch)
 	}()
 	return nextMsg(ch)
@@ -765,15 +768,16 @@ func readLoopCmd(conn *radio.Conn, ch chan tea.Msg) tea.Cmd {
 func reconnectCmd(oldConn *radio.Conn) tea.Cmd {
 	return func() tea.Msg {
 		oldConn.OnDisconnected()
-		// Wait for the reconnect timer to fire and attempt a new connection.
-		// The Conn's OnDisconnected schedules the re-dial internally.
-		// We poll briefly to see if a new connection was established.
-		for i := 0; i < 60; i++ {
-			time.Sleep(500 * time.Millisecond)
-			if oldConn.State() == radio.StateConnected {
-				return reconnectSuccessMsg{conn: oldConn}
-			}
+		// Wait for the reconnect to succeed (or time out).
+		done := oldConn.ReconnectDone()
+		if done == nil {
+			return reconnectFailedMsg{errMsg: "reconnect not enabled"}
 		}
-		return reconnectFailedMsg{errMsg: "timeout waiting for reconnect"}
+		select {
+		case <-done:
+			return reconnectSuccessMsg{conn: oldConn}
+		case <-time.After(30 * time.Second):
+			return reconnectFailedMsg{errMsg: "timeout waiting for reconnect"}
+		}
 	}
 }

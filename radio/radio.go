@@ -87,6 +87,7 @@ type Conn struct {
 	reconnectDelay  time.Duration
 	reconnecting    bool
 	reconnectStopCh chan struct{}
+	reconnectDoneCh chan struct{} // closed when reconnect succeeds
 
 	// graceful disconnect
 	gracefulMu    sync.Mutex
@@ -117,6 +118,7 @@ func Dial(address string) (*Conn, error) {
 		callbacks:       make(map[uint32]func(int, string)),
 		addr:            addr,
 		reconnectStopCh: make(chan struct{}),
+		reconnectDoneCh: make(chan struct{}),
 	}
 	rc.setState(StateConnecting)
 
@@ -389,6 +391,9 @@ func (rc *Conn) OnDisconnected() {
 		return
 	}
 
+	// Create a fresh channel for this reconnect cycle.
+	rc.reconnectDoneCh = make(chan struct{})
+
 	rc.reconnectTimer = time.AfterFunc(rc.reconnectDelay, func() {
 		select {
 		case <-rc.reconnectStopCh:
@@ -415,8 +420,18 @@ func (rc *Conn) OnDisconnected() {
 		rc.state.Store(int32(StateConnected))
 		rc.reconnectDelay = reconnectInitialDelay
 		rc.startHeartbeat()
+		close(rc.reconnectDoneCh)
 	})
 }
 
 // Addr returns the dial address used for this connection.
 func (rc *Conn) Addr() string { return rc.addr }
+
+// ReconnectDone returns a channel that is closed when an auto-reconnect
+// attempt succeeds. Returns nil if reconnect is not enabled.
+func (rc *Conn) ReconnectDone() <-chan struct{} {
+	if !rc.reconnecting {
+		return nil
+	}
+	return rc.reconnectDoneCh
+}
