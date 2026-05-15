@@ -239,55 +239,6 @@ func TestNextMsg_ClosedChannel(t *testing.T) {
 	}
 }
 
-// ─── parseFreqMHz ───────────────────────────────────────────────────────────
-
-func TestParseFreqMHz_Valid(t *testing.T) {
-	hz, err := parseFreqMHz("14.300")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if hz != 14300000 {
-		t.Fatalf("want 14300000 Hz, got %d", hz)
-	}
-}
-
-func TestParseFreqMHz_WholeNumber(t *testing.T) {
-	hz, err := parseFreqMHz("7")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if hz != 7000000 {
-		t.Fatalf("want 7000000 Hz, got %d", hz)
-	}
-}
-
-func TestParseFreqMHz_Invalid(t *testing.T) {
-	_, err := parseFreqMHz("abc")
-	if err == nil {
-		t.Fatal("expected error for invalid frequency")
-	}
-}
-
-func TestParseFreqMHzFloat_Valid(t *testing.T) {
-	mhz, err := parseFreqMHzFloat("14.300")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if mhz != 14.300 {
-		t.Fatalf("want 14.300 MHz, got %f", mhz)
-	}
-}
-
-func TestParseFreqMHzFloat_WholeNumber(t *testing.T) {
-	mhz, err := parseFreqMHzFloat("7")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if mhz != 7.0 {
-		t.Fatalf("want 7.0 MHz, got %f", mhz)
-	}
-}
-
 // ─── Frequency input model helpers ──────────────────────────────────────────
 
 func TestModel_SettingFreq_Enter(t *testing.T) {

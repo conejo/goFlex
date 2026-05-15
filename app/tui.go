@@ -17,8 +17,6 @@ import (
 	"goFlex/radio"
 )
 
-const maxLogLines = 500
-
 // ─── Tea messages ─────────────────────────────────────────────────────────────
 
 type connectedMsg struct {
@@ -36,7 +34,6 @@ type reconnectSuccessMsg struct{ conn *radio.Conn }
 
 type statusLineMsg struct{ text string }
 type logLineMsg struct{ text string }
-type freqSetMsg struct{ freqHz uint64 }
 
 type discoveryStartedMsg struct {
 	ch     chan tea.Msg
@@ -641,27 +638,17 @@ func (m model) connectCmd() tea.Cmd {
 // toggleSubCmd sends sub/unsub for a single subscription while connected.
 func toggleSubCmd(conn *radio.Conn, s subscription) tea.Cmd {
 	return func() tea.Msg {
+		var cmd string
 		if s.checked {
-			conn.Send(fmt.Sprintf("sub %s all", s.name), nil)
+			cmd = fmt.Sprintf("sub %s all", s.name)
 		} else {
-			conn.Send(fmt.Sprintf("unsub %s all", s.name), nil)
+			cmd = fmt.Sprintf("unsub %s all", s.name)
+		}
+		if _, err := conn.Send(cmd, nil); err != nil {
+			return logLineMsg{text: fmt.Sprintf("[sub] failed to toggle %s: %v", s.name, err)}
 		}
 		return nil
 	}
-}
-
-// parseFreqMHz converts a string like "14.300" (MHz) to Hz.
-func parseFreqMHz(freqStr string) (uint64, error) {
-	mhz, err := strconv.ParseFloat(freqStr, 64)
-	if err != nil {
-		return 0, err
-	}
-	return uint64(mhz * 1e6), nil
-}
-
-// parseFreqMHzFloat converts a string like "14.300" (MHz) to a float64 MHz value.
-func parseFreqMHzFloat(freqStr string) (float64, error) {
-	return strconv.ParseFloat(freqStr, 64)
 }
 
 // setFreqCmd parses a frequency string like "14.300" (MHz) and sends the
@@ -775,7 +762,10 @@ func reconnectCmd(oldConn *radio.Conn) tea.Cmd {
 		}
 		select {
 		case <-done:
-			return reconnectSuccessMsg{conn: oldConn}
+			if oldConn.State() == radio.StateConnected {
+				return reconnectSuccessMsg{conn: oldConn}
+			}
+			return reconnectFailedMsg{errMsg: "reconnect cancelled"}
 		case <-time.After(30 * time.Second):
 			return reconnectFailedMsg{errMsg: "timeout waiting for reconnect"}
 		}
