@@ -82,35 +82,50 @@ func newDefaultSubs() []subscription {
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 
-type model struct {
-	// Discovery phase
-	discovering    bool
-	radios         []radio.RadioInfo
-	discoverCh     chan tea.Msg
-	cancelDiscover context.CancelFunc
+// discoveryState tracks UDP discovery of radios on the local network.
+type discoveryState struct {
+	active  bool
+	radios  []radio.RadioInfo
+	ch      chan tea.Msg
+	cancel  context.CancelFunc
+}
 
-	// Connection
-	addr       string
-	connected  bool
-	connecting bool
-	conn       *radio.Conn
+// connectionState holds the current connection lifecycle state.
+type connectionState struct {
+	addr      string
+	connected bool
+	dialing   bool
+	conn      *radio.Conn
+}
 
-	errMsg string
-	status string
-	logs   []string
-	height int
-	width  int
-
-	// Frequency input
-	settingFreq  bool   // true when typing a frequency
-	freqInput    string // e.g. "14.300"
+// uiState holds all interactive UI state (cursor, scroll, input, etc.).
+type uiState struct {
+	settingFreq  bool
+	freqInput    string
 	readCh       chan tea.Msg
 	subs         []subscription
 	cursor       int
-	scrollOffset int  // display lines scrolled up from bottom; 0 = pinned to bottom
-	showSubs     bool // subscription panel visible while connected
-	maxLog       int  // maximum number of log entries to retain
-	cfg          *config.Config
+	scrollOffset int
+	showSubs     bool
+}
+
+// logState holds the log buffer and its size limit.
+type logState struct {
+	entries []string
+	max     int
+}
+
+type model struct {
+	discovery discoveryState
+	connState connectionState
+	ui        uiState
+	log       logState
+
+	errMsg string
+	status string
+	height int
+	width  int
+	cfg    *config.Config
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -138,9 +153,9 @@ var (
 // logHeight returns the number of display lines available for the log pane.
 func (m model) logHeight() int {
 	subsLines := 0
-	if !m.connected || m.showSubs {
+	if !m.connState.connected || m.ui.showSubs {
 		// "\nSubscriptions:\n" + N sub rows
-		subsLines = 2 + len(m.subs)
+		subsLines = 2 + len(m.ui.subs)
 	}
 	h := m.height - 3 - subsLines
 	if h < 1 {
@@ -151,7 +166,7 @@ func (m model) logHeight() int {
 
 // maxScrollOffset computes the largest valid scrollOffset for the current log content.
 func (m model) maxScrollOffset() int {
-	wrapped := wrapLogEntries(m.logs, m.width-2)
+	wrapped := wrapLogEntries(m.log.entries, m.width-2)
 	var total int
 	for _, w := range wrapped {
 		total += strings.Count(w, "\n") + 1
@@ -164,31 +179,31 @@ func (m model) maxScrollOffset() int {
 
 // withScrollUp moves the cursor up or scrolls the log up by one line.
 func (m model) withScrollUp() model {
-	if m.connected && !m.showSubs {
-		if max := m.maxScrollOffset(); m.scrollOffset < max {
-			m.scrollOffset++
+	if m.connState.connected && !m.ui.showSubs {
+		if max := m.maxScrollOffset(); m.ui.scrollOffset < max {
+			m.ui.scrollOffset++
 		}
-	} else if !m.connecting && m.cursor > 0 {
-		m.cursor--
+	} else if !m.connState.dialing && m.ui.cursor > 0 {
+		m.ui.cursor--
 	}
 	return m
 }
 
 // withScrollDown moves the cursor down or scrolls the log down.
 func (m model) withScrollDown() model {
-	if m.connected && !m.showSubs {
-		if m.scrollOffset > 0 {
-			m.scrollOffset--
+	if m.connState.connected && !m.ui.showSubs {
+		if m.ui.scrollOffset > 0 {
+			m.ui.scrollOffset--
 		}
-	} else if !m.connecting {
+	} else if !m.connState.dialing {
 		var maxCursor int
-		if m.discovering {
-			maxCursor = len(m.radios) - 1
+		if m.discovery.active {
+			maxCursor = len(m.discovery.radios) - 1
 		} else {
-			maxCursor = len(m.subs) - 1
+			maxCursor = len(m.ui.subs) - 1
 		}
-		if m.cursor < maxCursor {
-			m.cursor++
+		if m.ui.cursor < maxCursor {
+			m.ui.cursor++
 		}
 	}
 	return m
@@ -206,28 +221,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		// Frequency input mode takes precedence.
-		if m.settingFreq {
+		if m.ui.settingFreq {
 			switch msg.String() {
 			case "esc", "ctrl+c":
-				m.settingFreq = false
-				m.freqInput = ""
+				m.ui.settingFreq = false
+				m.ui.freqInput = ""
 			case "enter":
-				m.settingFreq = false
-				freqStr := m.freqInput
-				m.freqInput = ""
-				if freqStr != "" && m.conn != nil {
-					return m, setFreqCmd(m.conn, freqStr)
+				m.ui.settingFreq = false
+				freqStr := m.ui.freqInput
+				m.ui.freqInput = ""
+				if freqStr != "" && m.connState.conn != nil {
+					return m, setFreqCmd(m.connState.conn, freqStr)
 				}
 			case "backspace":
-				if len(m.freqInput) > 0 {
-					m.freqInput = m.freqInput[:len(m.freqInput)-1]
+				if len(m.ui.freqInput) > 0 {
+					m.ui.freqInput = m.ui.freqInput[:len(m.ui.freqInput)-1]
 				}
 			default:
 				// Accept digits and one decimal point.
 				if len(msg.String()) == 1 {
 					ch := msg.String()[0]
 					if (ch >= '0' && ch <= '9') || ch == '.' {
-						m.freqInput += string(ch)
+						m.ui.freqInput += string(ch)
 					}
 				}
 			}
@@ -236,61 +251,61 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "q", "ctrl+c":
-			if m.conn != nil {
-				m.conn.Close()
+			if m.connState.conn != nil {
+				m.connState.conn.Close()
 			}
-			if m.cancelDiscover != nil {
-				m.cancelDiscover()
+			if m.discovery.cancel != nil {
+				m.discovery.cancel()
 			}
 			return m, tea.Quit
 		case "s", "tab":
-			if m.connected {
-				m.showSubs = !m.showSubs
+			if m.connState.connected {
+				m.ui.showSubs = !m.ui.showSubs
 			}
 		case "f":
-			if m.connected && m.conn != nil {
-				m.settingFreq = true
-				m.freqInput = ""
+			if m.connState.connected && m.connState.conn != nil {
+				m.ui.settingFreq = true
+				m.ui.freqInput = ""
 			}
 		case "up", "k":
 			m = m.withScrollUp()
 		case "down", "j":
 			m = m.withScrollDown()
 		case "pgup":
-			m.scrollOffset += m.logHeight()
-			if max := m.maxScrollOffset(); m.scrollOffset > max {
-				m.scrollOffset = max
+			m.ui.scrollOffset += m.logHeight()
+			if max := m.maxScrollOffset(); m.ui.scrollOffset > max {
+				m.ui.scrollOffset = max
 			}
 		case "pgdown":
-			m.scrollOffset -= m.logHeight()
-			if m.scrollOffset < 0 {
-				m.scrollOffset = 0
+			m.ui.scrollOffset -= m.logHeight()
+			if m.ui.scrollOffset < 0 {
+				m.ui.scrollOffset = 0
 			}
 		case "G", "end":
-			m.scrollOffset = 0
+			m.ui.scrollOffset = 0
 		case " ":
-			if !m.connecting && (m.showSubs || !m.connected) {
-				m.subs[m.cursor].checked = !m.subs[m.cursor].checked
-				if m.connected && m.conn != nil {
-					return m, toggleSubCmd(m.conn, m.subs[m.cursor])
+			if !m.connState.dialing && (m.ui.showSubs || !m.connState.connected) {
+				m.ui.subs[m.ui.cursor].checked = !m.ui.subs[m.ui.cursor].checked
+				if m.connState.connected && m.connState.conn != nil {
+					return m, toggleSubCmd(m.connState.conn, m.ui.subs[m.ui.cursor])
 				}
 			}
 		case "enter":
-			if m.discovering && len(m.radios) > 0 {
+			if m.discovery.active && len(m.discovery.radios) > 0 {
 				// Select the highlighted radio and move to subscription screen.
-				if m.cursor >= len(m.radios) {
-					m.cursor = len(m.radios) - 1
+				if m.ui.cursor >= len(m.discovery.radios) {
+					m.ui.cursor = len(m.discovery.radios) - 1
 				}
-				sel := m.radios[m.cursor]
-				if m.cancelDiscover != nil {
-					m.cancelDiscover()
+				sel := m.discovery.radios[m.ui.cursor]
+				if m.discovery.cancel != nil {
+					m.discovery.cancel()
 				}
-				m.discovering = false
-				m.addr = fmt.Sprintf("%s:%d", sel.Address, sel.Port)
+				m.discovery.active = false
+				m.connState.addr = fmt.Sprintf("%s:%d", sel.Address, sel.Port)
 				m.status = fmt.Sprintf("%s  %s", sel.Model, sel.Address)
-				m.cursor = 0
-			} else if !m.connected && !m.connecting && !m.discovering {
-				m.connecting = true
+				m.ui.cursor = 0
+			} else if !m.connState.connected && !m.connState.dialing && !m.discovery.active {
+				m.connState.dialing = true
 				m.errMsg = ""
 				m.status = "Connecting…"
 				return m, m.connectCmd()
@@ -306,88 +321,88 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case discoveryStartedMsg:
-		m.discovering = true
-		m.discoverCh = msg.ch
-		m.cancelDiscover = msg.cancel
-		return m, nextMsg(m.discoverCh)
+		m.discovery.active = true
+		m.discovery.ch = msg.ch
+		m.discovery.cancel = msg.cancel
+		return m, nextMsg(m.discovery.ch)
 
 	case radioDiscoveredMsg:
-		m.radios = upsertRadio(m.radios, msg.info)
+		m.discovery.radios = upsertRadio(m.discovery.radios, msg.info)
 		// Keep cursor in bounds.
-		if m.cursor >= len(m.radios) {
-			m.cursor = len(m.radios) - 1
+		if m.ui.cursor >= len(m.discovery.radios) {
+			m.ui.cursor = len(m.discovery.radios) - 1
 		}
-		if m.discovering {
-			return m, nextMsg(m.discoverCh)
+		if m.discovery.active {
+			return m, nextMsg(m.discovery.ch)
 		}
 
 	case radioLostMsg:
-		m.radios = removeRadio(m.radios, msg.serial)
-		if m.cursor >= len(m.radios) && m.cursor > 0 {
-			m.cursor = len(m.radios) - 1
+		m.discovery.radios = removeRadio(m.discovery.radios, msg.serial)
+		if m.ui.cursor >= len(m.discovery.radios) && m.ui.cursor > 0 {
+			m.ui.cursor = len(m.discovery.radios) - 1
 		}
-		if m.discovering {
-			return m, nextMsg(m.discoverCh)
+		if m.discovery.active {
+			return m, nextMsg(m.discovery.ch)
 		}
 
 	case connectedMsg:
-		m.connecting = false
+		m.connState.dialing = false
 		if msg.errMsg != "" {
 			m.errMsg = msg.errMsg
 			m.status = "Disconnected"
 		} else {
-			m.connected = true
-			m.conn = msg.conn
-			m.logs = append(m.logs, msg.initLogs...)
-			m.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", m.conn.Handle, m.conn.Version)
-			m.readCh = make(chan tea.Msg, 64)
-			m.conn.EnableReconnect()
-			m.conn.OnStateChange = func(oldState, newState radio.ConnectionState) {
-				m.logs = append(m.logs, fmt.Sprintf("[state] %s → %s", oldState, newState))
+			m.connState.connected = true
+			m.connState.conn = msg.conn
+			m.log.entries = append(m.log.entries, msg.initLogs...)
+			m.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", m.connState.conn.Handle, m.connState.conn.Version)
+			m.ui.readCh = make(chan tea.Msg, 64)
+			m.connState.conn.EnableReconnect()
+			m.connState.conn.OnStateChange = func(oldState, newState radio.ConnectionState) {
+				m.log.entries = append(m.log.entries, fmt.Sprintf("[state] %s → %s", oldState, newState))
 			}
-			m.conn.OnPingRtt = func(ms int) {
-				m.logs = append(m.logs, fmt.Sprintf("[ping] RTT %d ms", ms))
+			m.connState.conn.OnPingRtt = func(ms int) {
+				m.log.entries = append(m.log.entries, fmt.Sprintf("[ping] RTT %d ms", ms))
 			}
-			return m, readLoopCmd(m.conn, m.readCh)
+			return m, readLoopCmd(m.connState.conn, m.ui.readCh)
 		}
 
 	case disconnectedMsg:
-		m.connected = false
-		m.conn = nil
+		m.connState.connected = false
+		m.connState.conn = nil
 		m.status = "Disconnected — reconnecting…"
 		if msg.err != nil {
-			m.logs = append(m.logs, fmt.Sprintf("[conn] connection lost: %v", msg.err))
+			m.log.entries = append(m.log.entries, fmt.Sprintf("[conn] connection lost: %v", msg.err))
 		} else {
-			m.logs = append(m.logs, "[conn] connection lost, attempting reconnect")
+			m.log.entries = append(m.log.entries, "[conn] connection lost, attempting reconnect")
 		}
 		return m, reconnectCmd(msg.conn)
 
 	case reconnectFailedMsg:
 		m.status = fmt.Sprintf("Reconnect failed: %s", msg.errMsg)
-		m.logs = append(m.logs, fmt.Sprintf("[conn] reconnect failed: %s", msg.errMsg))
+		m.log.entries = append(m.log.entries, fmt.Sprintf("[conn] reconnect failed: %s", msg.errMsg))
 
 	case reconnectSuccessMsg:
-		m.connected = true
-		m.conn = msg.conn
-		m.status = fmt.Sprintf("Reconnected  handle=0x%X  version=%s", m.conn.Handle, m.conn.Version)
-		m.logs = append(m.logs, "[conn] reconnected successfully")
-		m.readCh = make(chan tea.Msg, 64)
-		return m, readLoopCmd(m.conn, m.readCh)
+		m.connState.connected = true
+		m.connState.conn = msg.conn
+		m.status = fmt.Sprintf("Reconnected  handle=0x%X  version=%s", m.connState.conn.Handle, m.connState.conn.Version)
+		m.log.entries = append(m.log.entries, "[conn] reconnected successfully")
+		m.ui.readCh = make(chan tea.Msg, 64)
+		return m, readLoopCmd(m.connState.conn, m.ui.readCh)
 
 	case statusLineMsg:
 		m.status = msg.text
 
 	case logLineMsg:
-		m.logs = append(m.logs, msg.text)
-		if len(m.logs) > m.maxLog {
-			m.logs = m.logs[len(m.logs)-m.maxLog:]
+		m.log.entries = append(m.log.entries, msg.text)
+		if len(m.log.entries) > m.log.max {
+			m.log.entries = m.log.entries[len(m.log.entries)-m.log.max:]
 		}
 		// Anchor the viewport: when scrolled up, compensate for the new line
 		// added at the bottom so the visible content doesn't drift downward.
-		if m.scrollOffset > 0 {
-			m.scrollOffset++
+		if m.ui.scrollOffset > 0 {
+			m.ui.scrollOffset++
 		}
-		return m, nextMsg(m.readCh)
+		return m, nextMsg(m.ui.readCh)
 	}
 	return m, nil
 }
@@ -395,11 +410,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) viewHeader() string {
 	var btn string
 	switch {
-	case m.discovering:
+	case m.discovery.active:
 		btn = styleButtonDis.Render("Discovering…")
-	case m.connecting:
+	case m.connState.dialing:
 		btn = styleButtonDis.Render("Connecting…")
-	case m.connected:
+	case m.connState.connected:
 		btn = styleButtonDis.Render("Connected")
 	default:
 		btn = styleButton.Render("[ Connect ]")
@@ -407,7 +422,7 @@ func (m model) viewHeader() string {
 	var statusText string
 	if m.errMsg != "" {
 		statusText = styleErr.Render(m.errMsg)
-	} else if m.connected {
+	} else if m.connState.connected {
 		statusText = styleConnected.Render(m.status)
 	} else {
 		statusText = styleStatus.Render(m.status)
@@ -416,10 +431,10 @@ func (m model) viewHeader() string {
 }
 
 func (m model) viewFreqPrompt() string {
-	if !m.settingFreq {
+	if !m.ui.settingFreq {
 		return ""
 	}
-	prompt := fmt.Sprintf("Set frequency (MHz): %s", m.freqInput)
+	prompt := fmt.Sprintf("Set frequency (MHz): %s", m.ui.freqInput)
 	return lipgloss.NewStyle().
 		Background(lipgloss.Color("63")).
 		Foreground(lipgloss.Color("230")).
@@ -428,11 +443,11 @@ func (m model) viewFreqPrompt() string {
 }
 
 func (m model) viewRadioList() string {
-	if len(m.radios) == 0 {
+	if len(m.discovery.radios) == 0 {
 		return styleSubLabelDim.Render("  Scanning for radios…")
 	}
 	var sb strings.Builder
-	for i, r := range m.radios {
+	for i, r := range m.discovery.radios {
 		var statusStyle lipgloss.Style
 		if r.Status == "Available" {
 			statusStyle = styleConnected
@@ -441,7 +456,7 @@ func (m model) viewRadioList() string {
 		}
 		line := fmt.Sprintf(" %-14s %-16s %s",
 			styleRadioItem.Render(r.Model), styleRadioItem.Render(r.Address), statusStyle.Render(r.Status))
-		if i == m.cursor {
+		if i == m.ui.cursor {
 			line = styleCursor.Render("▶") + line
 		} else {
 			line = " " + line
@@ -452,11 +467,11 @@ func (m model) viewRadioList() string {
 }
 
 func (m model) viewSubsPanel() string {
-	if m.connected && !m.showSubs {
+	if m.connState.connected && !m.ui.showSubs {
 		return ""
 	}
 	var sb strings.Builder
-	for i, s := range m.subs {
+	for i, s := range m.ui.subs {
 		var box, label string
 		if s.checked {
 			box = styleChecked.Render("[x]")
@@ -466,7 +481,7 @@ func (m model) viewSubsPanel() string {
 			label = styleSubLabelDim.Render(s.label)
 		}
 		row := fmt.Sprintf(" %s %s", box, label)
-		if (!m.connecting || m.showSubs) && i == m.cursor {
+		if (!m.connState.dialing || m.ui.showSubs) && i == m.ui.cursor {
 			row = styleCursor.Render("▶") + row
 		} else {
 			row = " " + row
@@ -483,13 +498,13 @@ func (m model) viewLogPane() string {
 	if wrapWidth < 20 {
 		wrapWidth = 20
 	}
-	wrapped := wrapLogEntries(m.logs, wrapWidth)
+	wrapped := wrapLogEntries(m.log.entries, wrapWidth)
 	var displayLines []string
 	for _, w := range wrapped {
 		displayLines = append(displayLines, strings.Split(w, "\n")...)
 	}
 	total := len(displayLines)
-	offset := m.scrollOffset
+	offset := m.ui.scrollOffset
 	maxOffset := total - logHeight
 	if maxOffset < 0 {
 		maxOffset = 0
@@ -557,13 +572,13 @@ func buildScrollbar(height, total, start int) []string {
 func (m model) viewHelp() string {
 	var text string
 	switch {
-	case m.discovering:
+	case m.discovery.active:
 		text = "↑/↓: navigate   enter: select radio   q: quit"
-	case m.connected && m.showSubs:
+	case m.connState.connected && m.ui.showSubs:
 		text = "↑/↓: navigate   space: toggle sub   s/Tab: hide subs   q: quit"
-	case m.connected && m.scrollOffset > 0:
-		text = fmt.Sprintf("↑/↓/PgUp/PgDn: scroll   G/End: bottom   [+%d lines]   f: set freq   s: subscriptions   q: quit", m.scrollOffset)
-	case m.connected:
+	case m.connState.connected && m.ui.scrollOffset > 0:
+		text = fmt.Sprintf("↑/↓/PgUp/PgDn: scroll   G/End: bottom   [+%d lines]   f: set freq   s: subscriptions   q: quit", m.ui.scrollOffset)
+	case m.connState.connected:
 		text = "↑/↓/PgUp/PgDn: scroll   f: set freq   s: subscriptions   q: quit"
 	default:
 		text = "↑/↓: navigate   space: toggle   enter: connect   q: quit"
@@ -573,7 +588,7 @@ func (m model) viewHelp() string {
 
 func (m model) View() string {
 	sep := strings.Repeat("─", m.width)
-	if m.discovering {
+	if m.discovery.active {
 		return strings.Join([]string{
 			m.viewHeader() + "\n" + sep,
 			m.viewRadioList(),
@@ -581,7 +596,7 @@ func (m model) View() string {
 		}, "\n")
 	}
 	var header string
-	if m.settingFreq {
+	if m.ui.settingFreq {
 		header = m.viewHeader() + "\n" + m.viewFreqPrompt() + "\n" + sep
 	} else {
 		header = m.viewHeader() + m.viewSubsPanel() + sep
@@ -597,14 +612,14 @@ func (m model) View() string {
 
 // connectCmd returns a tea.Cmd that dials the radio using the selected subscriptions.
 func (m model) connectCmd() tea.Cmd {
-	subs := make([]string, 0, len(m.subs))
-	for _, s := range m.subs {
+	subs := make([]string, 0, len(m.ui.subs))
+	for _, s := range m.ui.subs {
 		if s.checked {
 			subs = append(subs, s.name)
 		}
 	}
 	return func() tea.Msg {
-		conn, err := radio.Dial(m.addr)
+		conn, err := radio.Dial(m.connState.addr)
 		if err != nil {
 			return connectedMsg{errMsg: err.Error()}
 		}
