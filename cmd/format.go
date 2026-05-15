@@ -79,7 +79,7 @@ func printSlices(w io.Writer, slices map[string]map[string]string) {
 		}
 		sort.Strings(rest)
 		for _, k := range rest {
-			fmt.Fprintf(w, "    %-18s: %s\n", k, props[k])
+			fmt.Fprintf(w, "    %-18s: %s\n", formatLabel(k), props[k])
 		}
 	}
 }

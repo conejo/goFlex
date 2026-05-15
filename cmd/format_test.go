@@ -108,8 +108,8 @@ func TestPrintSlices(t *testing.T) {
 	if !strings.Contains(out, "USB") {
 		t.Error("expected mode 'USB'")
 	}
-	if !strings.Contains(out, "custom_prop") {
-		t.Error("expected non-priority key 'custom_prop' to appear")
+	if !strings.Contains(out, "Custom Prop") {
+		t.Error("expected formatted non-priority key 'Custom Prop'")
 	}
 }
 

@@ -141,7 +141,7 @@ func runDiscovery(ctx context.Context, pc net.PacketConn, ch chan<- DiscoveryEve
 	}
 }
 
-// parseDiscoveryPacket parses a raw UDP datagram into a RadioInfo.
+// parseDiscoveryPacket parses a raw UDP datagram into a DiscoveredRadio.
 // Returns false when the packet lacks a serial number.
 func parseDiscoveryPacket(data []byte, sender net.Addr) (DiscoveredRadio, bool) {
 	kvs := make(map[string]string)

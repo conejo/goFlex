@@ -358,10 +358,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ui.readCh = make(chan tea.Msg, 64)
 			m.connState.conn.EnableReconnect()
 			m.connState.conn.OnStateChange = func(oldState, newState radio.ConnectionState) {
-				m.log.entries = append(m.log.entries, fmt.Sprintf("[state] %s → %s", oldState, newState))
+				m.ui.readCh <- logLineMsg{text: fmt.Sprintf("[state] %s → %s", oldState, newState)}
 			}
 			m.connState.conn.OnPingRtt = func(ms int) {
-				m.log.entries = append(m.log.entries, fmt.Sprintf("[ping] RTT %d ms", ms))
+				m.ui.readCh <- logLineMsg{text: fmt.Sprintf("[ping] RTT %d ms", ms)}
 			}
 			return m, readLoopCmd(m.connState.conn, m.ui.readCh)
 		}
@@ -387,6 +387,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Reconnected  handle=0x%X  version=%s", m.connState.conn.Handle, m.connState.conn.Version)
 		m.log.entries = append(m.log.entries, "[conn] reconnected successfully")
 		m.ui.readCh = make(chan tea.Msg, 64)
+		m.connState.conn.OnStateChange = func(oldState, newState radio.ConnectionState) {
+			m.ui.readCh <- logLineMsg{text: fmt.Sprintf("[state] %s → %s", oldState, newState)}
+		}
+		m.connState.conn.OnPingRtt = func(ms int) {
+			m.ui.readCh <- logLineMsg{text: fmt.Sprintf("[ping] RTT %d ms", ms)}
+		}
 		return m, readLoopCmd(m.connState.conn, m.ui.readCh)
 
 	case statusLineMsg:
@@ -645,12 +651,16 @@ func (m model) connectCmd() tea.Cmd {
 			}
 		}
 		guiClientID := uuid.New().String()
-		conn.Send(fmt.Sprintf("client gui %s", guiClientID), func(code int, body string) {
+		if _, err := conn.Send(fmt.Sprintf("client gui %s", guiClientID), func(code int, body string) {
 			if code == 0 {
 				conn.Send("client program AetherSDR", nil)
 				conn.Send("client station AetherSDR-Go", nil)
+			} else {
+				initLogs = append(initLogs, fmt.Sprintf("[client] gui registration rejected (code %d): %s", code, body))
 			}
-		})
+		}); err != nil {
+			initLogs = append(initLogs, fmt.Sprintf("[client] failed to send gui registration: %v", err))
+		}
 
 		return connectedMsg{conn: conn, initLogs: initLogs}
 	}
@@ -686,11 +696,13 @@ func setFreqCmd(conn *radio.Conn, freqStr string) tea.Cmd {
 		}
 		// Target slice 0 (first slice) with 6-decimal precision.
 		cmd := fmt.Sprintf("slice tune 0 %.6f autopan=0", mhz)
-		conn.Send(cmd, func(code int, body string) {
+		if _, err := conn.Send(cmd, func(code int, body string) {
 			if code != 0 {
 				// non-zero code means error — radio rejected the tune
 			}
-		})
+		}); err != nil {
+			return logLineMsg{text: fmt.Sprintf("[freq] failed to send tune: %v", err)}
+		}
 		return logLineMsg{text: fmt.Sprintf("[freq] set %.6f MHz  →  %s", mhz, cmd)}
 	}
 }

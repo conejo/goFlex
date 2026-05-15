@@ -329,12 +329,15 @@ func (rc *Conn) GracefulDisconnect(streamID string, streamRemoveSeq uint32) {
 	if streamID != "" && streamRemoveSeq != 0 {
 		// Wait up to 2 s for the radio to ack the stream remove.
 		done := make(chan struct{})
-		rc.Send(fmt.Sprintf("stream remove 0x%s", streamID), func(code int, body string) {
+		if _, err := rc.Send(fmt.Sprintf("stream remove 0x%s", streamID), func(code int, body string) {
 			close(done)
-		})
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
+		}); err != nil {
+			// Send failed — skip waiting for response.
+		} else {
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+			}
 		}
 	}
 
