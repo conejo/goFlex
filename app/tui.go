@@ -84,10 +84,10 @@ func newDefaultSubs() []subscription {
 
 // discoveryState tracks UDP discovery of radios on the local network.
 type discoveryState struct {
-	active  bool
-	radios  []radio.RadioInfo
-	ch      chan tea.Msg
-	cancel  context.CancelFunc
+	active bool
+	radios []radio.RadioInfo
+	ch     chan tea.Msg
+	cancel context.CancelFunc
 }
 
 // connectionState holds the current connection lifecycle state.
