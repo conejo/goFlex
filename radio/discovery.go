@@ -21,8 +21,8 @@ const (
 	staleCheckPeriod = time.Second
 )
 
-// RadioInfo holds the fields broadcast by a FlexRadio discovery datagram.
-type RadioInfo struct {
+// DiscoveredRadio holds the fields broadcast by a FlexRadio discovery datagram.
+type DiscoveredRadio struct {
 	Name               string
 	Model              string
 	Serial             string // unique key; datagrams without serial are ignored
@@ -41,7 +41,7 @@ type RadioInfo struct {
 
 // DiscoveryEvent is emitted on the channel returned by Listen.
 type DiscoveryEvent struct {
-	Radio RadioInfo
+	Radio DiscoveredRadio
 	Lost  bool // true when the radio has gone stale and is being removed
 }
 
@@ -65,7 +65,7 @@ func runDiscovery(ctx context.Context, pc net.PacketConn, ch chan<- DiscoveryEve
 	defer close(ch)
 
 	type entry struct {
-		info    RadioInfo
+		info    DiscoveredRadio
 		lastSee time.Time
 	}
 
@@ -143,7 +143,7 @@ func runDiscovery(ctx context.Context, pc net.PacketConn, ch chan<- DiscoveryEve
 
 // parseDiscoveryPacket parses a raw UDP datagram into a RadioInfo.
 // Returns false when the packet lacks a serial number.
-func parseDiscoveryPacket(data []byte, sender net.Addr) (RadioInfo, bool) {
+func parseDiscoveryPacket(data []byte, sender net.Addr) (DiscoveredRadio, bool) {
 	kvs := make(map[string]string)
 	for _, token := range strings.Fields(string(data)) {
 		if eq := strings.IndexByte(token, '='); eq >= 0 {
@@ -153,7 +153,7 @@ func parseDiscoveryPacket(data []byte, sender net.Addr) (RadioInfo, bool) {
 
 	serial := kvs["serial"]
 	if serial == "" {
-		return RadioInfo{}, false
+		return DiscoveredRadio{}, false
 	}
 
 	ip := kvs["ip"]
@@ -172,7 +172,7 @@ func parseDiscoveryPacket(data []byte, sender net.Addr) (RadioInfo, bool) {
 	maxLic, _ := strconv.Atoi(kvs["max_licensed_version"])
 	inUse := kvs["inuse"] == "1"
 
-	return RadioInfo{
+	return DiscoveredRadio{
 		Name:               kvs["name"],
 		Model:              kvs["model"],
 		Serial:             serial,

@@ -14,7 +14,9 @@ var styleContPrefix = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 // wordWrap breaks s into lines no wider than width, preferring space boundaries.
 // Falls back to a hard break when no space exists within the width.
+// Tabs are expanded to 4 spaces before wrapping.
 func wordWrap(s string, width int) []string {
+	s = strings.ReplaceAll(s, "\t", "    ")
 	var lines []string
 	runes := []rune(s)
 	for len(runes) > 0 {

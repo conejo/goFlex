@@ -39,7 +39,7 @@ type discoveryStartedMsg struct {
 	ch     chan tea.Msg
 	cancel context.CancelFunc
 }
-type radioDiscoveredMsg struct{ info radio.RadioInfo }
+type radioDiscoveredMsg struct{ info radio.DiscoveredRadio }
 type radioLostMsg struct{ serial string }
 
 // ─── Subscription list ────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ func newDefaultSubs() []subscription {
 // discoveryState tracks UDP discovery of radios on the local network.
 type discoveryState struct {
 	active bool
-	radios []radio.RadioInfo
+	radios []radio.DiscoveredRadio
 	ch     chan tea.Msg
 	cancel context.CancelFunc
 }
@@ -636,7 +636,13 @@ func (m model) connectCmd() tea.Cmd {
 		}
 
 		for _, name := range subs {
-			conn.Send(fmt.Sprintf("sub %s all", name), nil)
+			if _, err := conn.Send(fmt.Sprintf("sub %s all", name), func(code int, body string) {
+				if code != 0 {
+					initLogs = append(initLogs, fmt.Sprintf("[sub] %s rejected (code %d): %s", name, code, body))
+				}
+			}); err != nil {
+				initLogs = append(initLogs, fmt.Sprintf("[sub] failed to send %s: %v", name, err))
+			}
 		}
 		guiClientID := uuid.New().String()
 		conn.Send(fmt.Sprintf("client gui %s", guiClientID), func(code int, body string) {
@@ -714,7 +720,7 @@ func startDiscoveryCmd() tea.Cmd {
 }
 
 // upsertRadio adds or updates a radio in the list, keyed by serial.
-func upsertRadio(radios []radio.RadioInfo, info radio.RadioInfo) []radio.RadioInfo {
+func upsertRadio(radios []radio.DiscoveredRadio, info radio.DiscoveredRadio) []radio.DiscoveredRadio {
 	for i, r := range radios {
 		if r.Serial == info.Serial {
 			radios[i] = info
@@ -725,7 +731,7 @@ func upsertRadio(radios []radio.RadioInfo, info radio.RadioInfo) []radio.RadioIn
 }
 
 // removeRadio removes the radio with the given serial from the list.
-func removeRadio(radios []radio.RadioInfo, serial string) []radio.RadioInfo {
+func removeRadio(radios []radio.DiscoveredRadio, serial string) []radio.DiscoveredRadio {
 	for i, r := range radios {
 		if r.Serial == serial {
 			return append(radios[:i], radios[i+1:]...)

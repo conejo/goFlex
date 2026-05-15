@@ -104,8 +104,8 @@ func TestNewDefaultSubs(t *testing.T) {
 // ─── upsertRadio / removeRadio ──────────────────────────────────────────────
 
 func TestUpsertRadio_AddsNew(t *testing.T) {
-	radios := []radio.RadioInfo{}
-	info := radio.RadioInfo{Serial: "1234", Model: "FLEX-6600"}
+	radios := []radio.DiscoveredRadio{}
+	info := radio.DiscoveredRadio{Serial: "1234", Model: "FLEX-6600"}
 	result := upsertRadio(radios, info)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 radio, got %d", len(result))
@@ -116,8 +116,8 @@ func TestUpsertRadio_AddsNew(t *testing.T) {
 }
 
 func TestUpsertRadio_UpdatesExisting(t *testing.T) {
-	radios := []radio.RadioInfo{{Serial: "1234", Model: "FLEX-6600"}}
-	info := radio.RadioInfo{Serial: "1234", Model: "FLEX-6700"}
+	radios := []radio.DiscoveredRadio{{Serial: "1234", Model: "FLEX-6600"}}
+	info := radio.DiscoveredRadio{Serial: "1234", Model: "FLEX-6700"}
 	result := upsertRadio(radios, info)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 radio, got %d", len(result))
@@ -128,7 +128,7 @@ func TestUpsertRadio_UpdatesExisting(t *testing.T) {
 }
 
 func TestRemoveRadio(t *testing.T) {
-	radios := []radio.RadioInfo{
+	radios := []radio.DiscoveredRadio{
 		{Serial: "1111"},
 		{Serial: "2222"},
 		{Serial: "3333"},
@@ -145,7 +145,7 @@ func TestRemoveRadio(t *testing.T) {
 }
 
 func TestRemoveRadio_NotFound(t *testing.T) {
-	radios := []radio.RadioInfo{{Serial: "1111"}}
+	radios := []radio.DiscoveredRadio{{Serial: "1111"}}
 	result := removeRadio(radios, "9999")
 	if len(result) != 1 {
 		t.Fatalf("expected 1 radio, got %d", len(result))
