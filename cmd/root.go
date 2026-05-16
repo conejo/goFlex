@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"goFlex/config"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -33,9 +35,9 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.goFlex.yaml)")
-	rootCmd.PersistentFlags().String("radio-address", "192.168.50.151", "IP or hostname of the FlexRadio")
-	rootCmd.PersistentFlags().Int("radio-port", 4992, "TCP port for the SmartSDR protocol")
-	rootCmd.PersistentFlags().Int("max-log", 500, "maximum log entries to retain in the TUI")
+	rootCmd.PersistentFlags().String("radio-address", config.DefaultRadioAddr, "IP or hostname of the FlexRadio")
+	rootCmd.PersistentFlags().Int("radio-port", config.DefaultRadioPort, "TCP port for the SmartSDR protocol")
+	rootCmd.PersistentFlags().Int("max-log", config.DefaultMaxLog, "maximum log entries to retain in the TUI")
 
 	viper.BindPFlag("radio-address", rootCmd.PersistentFlags().Lookup("radio-address"))
 	viper.BindPFlag("radio-port", rootCmd.PersistentFlags().Lookup("radio-port"))

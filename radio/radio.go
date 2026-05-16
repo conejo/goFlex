@@ -83,10 +83,13 @@ type Conn struct {
 	pingSent       time.Time
 
 	// reconnect
-	reconnectTimer  *time.Timer
-	reconnectDelay  time.Duration
-	reconnecting    bool
-	reconnectStopCh chan struct{}
+	reconnectTimer    *time.Timer
+	reconnectDelay    time.Duration
+	reconnecting      bool
+	reconnectStopCh   chan struct{}
+	reconnectStopOnce sync.Once
+	reconnectDoneCh   chan struct{} // closed when reconnect succeeds
+	reconnectDoneOnce sync.Once
 
 	// graceful disconnect
 	gracefulMu    sync.Mutex
@@ -117,6 +120,7 @@ func Dial(address string) (*Conn, error) {
 		callbacks:       make(map[uint32]func(int, string)),
 		addr:            addr,
 		reconnectStopCh: make(chan struct{}),
+		reconnectDoneCh: make(chan struct{}),
 	}
 	rc.setState(StateConnecting)
 
@@ -291,11 +295,13 @@ func (rc *Conn) heartbeatTick() {
 	if rc.State() != StateConnected {
 		return
 	}
-	seq := rc.seqCtr.Add(1)
-	rc.pingSeq = seq
 	rc.pingSent = time.Now()
-	wire := fmt.Sprintf("C%d|ping\n", seq)
-	fmt.Fprint(rc.conn, wire)
+	seq, err := rc.Send("ping", nil)
+	if err != nil {
+		rc.conn.Close()
+		return
+	}
+	rc.pingSeq = seq
 
 	// If no reply within pingTimeout, treat as dead connection.
 	time.AfterFunc(pingTimeout, func() {
@@ -323,12 +329,15 @@ func (rc *Conn) GracefulDisconnect(streamID string, streamRemoveSeq uint32) {
 	if streamID != "" && streamRemoveSeq != 0 {
 		// Wait up to 2 s for the radio to ack the stream remove.
 		done := make(chan struct{})
-		rc.Send(fmt.Sprintf("stream remove 0x%s", streamID), func(code int, body string) {
+		if _, err := rc.Send(fmt.Sprintf("stream remove 0x%s", streamID), func(code int, body string) {
 			close(done)
-		})
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
+		}); err != nil {
+			// Send failed — skip waiting for response.
+		} else {
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+			}
 		}
 	}
 
@@ -365,10 +374,14 @@ func (rc *Conn) stopReconnect() {
 		rc.reconnectTimer.Stop()
 		rc.reconnectTimer = nil
 	}
-	select {
-	case <-rc.reconnectStopCh:
-	default:
+	rc.reconnectStopOnce.Do(func() {
 		close(rc.reconnectStopCh)
+	})
+	// Signal any waiter on ReconnectDone that reconnect won't happen.
+	if rc.reconnectDoneCh != nil {
+		rc.reconnectDoneOnce.Do(func() {
+			close(rc.reconnectDoneCh)
+		})
 	}
 }
 
@@ -388,6 +401,10 @@ func (rc *Conn) OnDisconnected() {
 	if wasGraceful {
 		return
 	}
+
+	// Create a fresh channel for this reconnect cycle.
+	rc.reconnectDoneCh = make(chan struct{})
+	rc.reconnectDoneOnce = sync.Once{}
 
 	rc.reconnectTimer = time.AfterFunc(rc.reconnectDelay, func() {
 		select {
@@ -415,8 +432,20 @@ func (rc *Conn) OnDisconnected() {
 		rc.state.Store(int32(StateConnected))
 		rc.reconnectDelay = reconnectInitialDelay
 		rc.startHeartbeat()
+		rc.reconnectDoneOnce.Do(func() {
+			close(rc.reconnectDoneCh)
+		})
 	})
 }
 
 // Addr returns the dial address used for this connection.
 func (rc *Conn) Addr() string { return rc.addr }
+
+// ReconnectDone returns a channel that is closed when an auto-reconnect
+// attempt succeeds. Returns nil if reconnect is not enabled.
+func (rc *Conn) ReconnectDone() <-chan struct{} {
+	if !rc.reconnecting {
+		return nil
+	}
+	return rc.reconnectDoneCh
+}

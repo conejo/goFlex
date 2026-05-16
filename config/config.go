@@ -8,12 +8,13 @@ import (
 	"strconv"
 
 	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
 const (
-	defaultRadioAddr = "192.168.50.151"
-	defaultRadioPort = 4992
-	defaultMaxLog    = 500
+	DefaultRadioAddr = "192.168.50.151"
+	DefaultRadioPort = 4992
+	DefaultMaxLog    = 500
 )
 
 // Config holds all user-configurable settings.
@@ -29,12 +30,12 @@ func Load() (*Config, error) {
 	// .env is optional — ignore ErrNotExist.
 	_ = godotenv.Load()
 
-	addr := getEnv("RADIO_ADDRESS", defaultRadioAddr)
-	port, err := getEnvInt("RADIO_PORT", defaultRadioPort)
+	addr := getEnv("RADIO_ADDRESS", DefaultRadioAddr)
+	port, err := getEnvInt("RADIO_PORT", DefaultRadioPort)
 	if err != nil {
 		return nil, fmt.Errorf("invalid RADIO_PORT: %w", err)
 	}
-	maxLog, err := getEnvInt("MAX_LOG", defaultMaxLog)
+	maxLog, err := getEnvInt("MAX_LOG", DefaultMaxLog)
 	if err != nil {
 		return nil, fmt.Errorf("invalid MAX_LOG: %w", err)
 	}
@@ -44,6 +45,16 @@ func Load() (*Config, error) {
 		RadioPort:    port,
 		MaxLog:       maxLog,
 	}, nil
+}
+
+// FromViper builds a Config from Viper settings (flags, env, config file).
+// This is the preferred path when running through the CLI.
+func FromViper(v *viper.Viper) *Config {
+	return &Config{
+		RadioAddress: v.GetString("radio-address"),
+		RadioPort:    v.GetInt("radio-port"),
+		MaxLog:       v.GetInt("max-log"),
+	}
 }
 
 func getEnv(key, fallback string) string {

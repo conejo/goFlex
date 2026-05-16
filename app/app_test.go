@@ -104,8 +104,8 @@ func TestNewDefaultSubs(t *testing.T) {
 // ─── upsertRadio / removeRadio ──────────────────────────────────────────────
 
 func TestUpsertRadio_AddsNew(t *testing.T) {
-	radios := []radio.RadioInfo{}
-	info := radio.RadioInfo{Serial: "1234", Model: "FLEX-6600"}
+	radios := []radio.DiscoveredRadio{}
+	info := radio.DiscoveredRadio{Serial: "1234", Model: "FLEX-6600"}
 	result := upsertRadio(radios, info)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 radio, got %d", len(result))
@@ -116,8 +116,8 @@ func TestUpsertRadio_AddsNew(t *testing.T) {
 }
 
 func TestUpsertRadio_UpdatesExisting(t *testing.T) {
-	radios := []radio.RadioInfo{{Serial: "1234", Model: "FLEX-6600"}}
-	info := radio.RadioInfo{Serial: "1234", Model: "FLEX-6700"}
+	radios := []radio.DiscoveredRadio{{Serial: "1234", Model: "FLEX-6600"}}
+	info := radio.DiscoveredRadio{Serial: "1234", Model: "FLEX-6700"}
 	result := upsertRadio(radios, info)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 radio, got %d", len(result))
@@ -128,7 +128,7 @@ func TestUpsertRadio_UpdatesExisting(t *testing.T) {
 }
 
 func TestRemoveRadio(t *testing.T) {
-	radios := []radio.RadioInfo{
+	radios := []radio.DiscoveredRadio{
 		{Serial: "1111"},
 		{Serial: "2222"},
 		{Serial: "3333"},
@@ -145,7 +145,7 @@ func TestRemoveRadio(t *testing.T) {
 }
 
 func TestRemoveRadio_NotFound(t *testing.T) {
-	radios := []radio.RadioInfo{{Serial: "1111"}}
+	radios := []radio.DiscoveredRadio{{Serial: "1111"}}
 	result := removeRadio(radios, "9999")
 	if len(result) != 1 {
 		t.Fatalf("expected 1 radio, got %d", len(result))
@@ -155,21 +155,21 @@ func TestRemoveRadio_NotFound(t *testing.T) {
 // ─── Model helpers ──────────────────────────────────────────────────────────
 
 func TestModel_LogHeight(t *testing.T) {
-	m := model{height: 30, width: 80, subs: newDefaultSubs()}
+	m := model{height: 30, width: 80, ui: uiState{subs: newDefaultSubs()}}
 	// Not connected, showSubs true → subs panel visible.
-	m.connected = false
-	m.showSubs = true
+	m.connState.connected = false
+	m.ui.showSubs = true
 	h := m.logHeight()
-	want := m.height - 3 - (2 + len(m.subs))
+	want := m.height - 3 - (2 + len(m.ui.subs))
 	if h != want {
 		t.Fatalf("logHeight: want %d, got %d", want, h)
 	}
 }
 
 func TestModel_LogHeight_Connected(t *testing.T) {
-	m := model{height: 30, width: 80, subs: newDefaultSubs()}
-	m.connected = true
-	m.showSubs = false
+	m := model{height: 30, width: 80, ui: uiState{subs: newDefaultSubs()}}
+	m.connState.connected = true
+	m.ui.showSubs = false
 	h := m.logHeight()
 	want := m.height - 3 // no subs panel
 	if h != want {
@@ -179,28 +179,28 @@ func TestModel_LogHeight_Connected(t *testing.T) {
 
 func TestModel_WithScrollUp(t *testing.T) {
 	// Create logs long enough to require scrolling.
-	logs := make([]string, 50)
-	for i := range logs {
-		logs[i] = "this is a moderately long log line that will wrap or at least consume height"
+	entries := make([]string, 50)
+	for i := range entries {
+		entries[i] = "this is a moderately long log line that will wrap or at least consume height"
 	}
-	m := model{height: 10, width: 40, connected: true, showSubs: false, logs: logs}
-	m.scrollOffset = 0
+	m := model{height: 10, width: 40, connState: connectionState{connected: true}, ui: uiState{showSubs: false}, log: logState{entries: entries}}
+	m.ui.scrollOffset = 0
 	m = m.withScrollUp()
-	if m.scrollOffset != 1 {
-		t.Fatalf("scrollOffset: want 1, got %d", m.scrollOffset)
+	if m.ui.scrollOffset != 1 {
+		t.Fatalf("scrollOffset: want 1, got %d", m.ui.scrollOffset)
 	}
 }
 
 func TestModel_WithScrollDown(t *testing.T) {
-	m := model{height: 30, width: 80, connected: true, showSubs: false, scrollOffset: 2}
+	m := model{height: 30, width: 80, connState: connectionState{connected: true}, ui: uiState{showSubs: false, scrollOffset: 2}}
 	m = m.withScrollDown()
-	if m.scrollOffset != 1 {
-		t.Fatalf("scrollOffset: want 1, got %d", m.scrollOffset)
+	if m.ui.scrollOffset != 1 {
+		t.Fatalf("scrollOffset: want 1, got %d", m.ui.scrollOffset)
 	}
 }
 
 func TestModel_MaxScrollOffset(t *testing.T) {
-	m := model{height: 10, width: 40, logs: []string{"hello world this is a long log entry"}}
+	m := model{height: 10, width: 40, log: logState{entries: []string{"hello world this is a long log entry"}}}
 	max := m.maxScrollOffset()
 	if max < 0 {
 		t.Fatalf("maxScrollOffset should be >= 0, got %d", max)
@@ -239,67 +239,18 @@ func TestNextMsg_ClosedChannel(t *testing.T) {
 	}
 }
 
-// ─── parseFreqMHz ───────────────────────────────────────────────────────────
-
-func TestParseFreqMHz_Valid(t *testing.T) {
-	hz, err := parseFreqMHz("14.300")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if hz != 14300000 {
-		t.Fatalf("want 14300000 Hz, got %d", hz)
-	}
-}
-
-func TestParseFreqMHz_WholeNumber(t *testing.T) {
-	hz, err := parseFreqMHz("7")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if hz != 7000000 {
-		t.Fatalf("want 7000000 Hz, got %d", hz)
-	}
-}
-
-func TestParseFreqMHz_Invalid(t *testing.T) {
-	_, err := parseFreqMHz("abc")
-	if err == nil {
-		t.Fatal("expected error for invalid frequency")
-	}
-}
-
-func TestParseFreqMHzFloat_Valid(t *testing.T) {
-	mhz, err := parseFreqMHzFloat("14.300")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if mhz != 14.300 {
-		t.Fatalf("want 14.300 MHz, got %f", mhz)
-	}
-}
-
-func TestParseFreqMHzFloat_WholeNumber(t *testing.T) {
-	mhz, err := parseFreqMHzFloat("7")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if mhz != 7.0 {
-		t.Fatalf("want 7.0 MHz, got %f", mhz)
-	}
-}
-
 // ─── Frequency input model helpers ──────────────────────────────────────────
 
 func TestModel_SettingFreq_Enter(t *testing.T) {
-	m := model{height: 30, width: 80, connected: true, settingFreq: true, freqInput: "14.300"}
+	m := model{height: 30, width: 80, connState: connectionState{connected: true}, ui: uiState{settingFreq: true, freqInput: "14.300"}}
 	m = m.withScrollUp() // should not affect freq input mode
-	if !m.settingFreq {
+	if !m.ui.settingFreq {
 		t.Fatal("settingFreq should remain true")
 	}
 }
 
 func TestModel_ViewFreqPrompt(t *testing.T) {
-	m := model{height: 30, width: 80, connected: true, settingFreq: true, freqInput: "7.200"}
+	m := model{height: 30, width: 80, connState: connectionState{connected: true}, ui: uiState{settingFreq: true, freqInput: "7.200"}}
 	prompt := m.viewFreqPrompt()
 	if prompt == "" {
 		t.Fatal("expected non-empty prompt")
@@ -310,7 +261,7 @@ func TestModel_ViewFreqPrompt(t *testing.T) {
 }
 
 func TestModel_ViewFreqPrompt_Hidden(t *testing.T) {
-	m := model{height: 30, width: 80, connected: true, settingFreq: false}
+	m := model{height: 30, width: 80, connState: connectionState{connected: true}, ui: uiState{settingFreq: false}}
 	prompt := m.viewFreqPrompt()
 	if prompt != "" {
 		t.Fatalf("expected empty prompt when not setting freq, got %q", prompt)

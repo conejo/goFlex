@@ -24,10 +24,12 @@ func RunWithConfig(cfg *config.Config) error {
 	p := tea.NewProgram(
 		model{
 			status: "Scanning for radios…",
-			subs:   newDefaultSubs(),
-			maxLog: cfg.MaxLog,
+			ui:     uiState{subs: newDefaultSubs()},
+			log:    logState{max: cfg.MaxLog},
 			cfg:    cfg,
-			addr:   fmt.Sprintf("%s:%d", cfg.RadioAddress, cfg.RadioPort),
+			connState: connectionState{
+				addr: fmt.Sprintf("%s:%d", cfg.RadioAddress, cfg.RadioPort),
+			},
 		},
 		tea.WithAltScreen(),
 	)

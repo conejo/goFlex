@@ -38,7 +38,7 @@ func printSettings(w io.Writer, settings map[string]string) {
 	fmt.Fprintln(w, "\n--- Additional Settings ---")
 	for key, val := range settings {
 		if !shown[key] {
-			fmt.Fprintf(w, "  %-24s: %s\n", key, val)
+			fmt.Fprintf(w, "  %-24s: %s\n", formatLabel(key), val)
 		}
 	}
 }
@@ -79,7 +79,7 @@ func printSlices(w io.Writer, slices map[string]map[string]string) {
 		}
 		sort.Strings(rest)
 		for _, k := range rest {
-			fmt.Fprintf(w, "    %-18s: %s\n", k, props[k])
+			fmt.Fprintf(w, "    %-18s: %s\n", formatLabel(k), props[k])
 		}
 	}
 }

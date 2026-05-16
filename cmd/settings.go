@@ -27,11 +27,7 @@ func init() {
 }
 
 func runSettings(cmd *cobra.Command, args []string) error {
-	cfg := &config.Config{
-		RadioAddress: viper.GetString("radio-address"),
-		RadioPort:    viper.GetInt("radio-port"),
-		MaxLog:       viper.GetInt("max-log"),
-	}
+	cfg := config.FromViper(viper.GetViper())
 
 	addr := fmt.Sprintf("%s:%d", cfg.RadioAddress, cfg.RadioPort)
 	out := cmd.OutOrStdout()
