@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -168,11 +169,11 @@ func TestHub_AppendLog(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(entries))
 	}
-	if entries[0] != "line 1" {
-		t.Errorf("entries[0] = %q, want 'line 1'", entries[0])
+	if entries[0] != "line 2" {
+		t.Errorf("entries[0] = %q, want 'line 2'", entries[0])
 	}
-	if entries[1] != "line 2" {
-		t.Errorf("entries[1] = %q, want 'line 2'", entries[1])
+	if entries[1] != "line 1" {
+		t.Errorf("entries[1] = %q, want 'line 1'", entries[1])
 	}
 }
 
@@ -187,9 +188,9 @@ func TestHub_AppendLog_Truncates(t *testing.T) {
 	if len(entries) != 3 {
 		t.Fatalf("expected 3 entries (max), got %d", len(entries))
 	}
-	// Should keep the last 3: "c", "d", "e"
-	if entries[0] != "c" {
-		t.Errorf("entries[0] = %q, want 'c'", entries[0])
+	// Should keep the newest 3: "e", "d", "c"
+	if entries[0] != "e" {
+		t.Errorf("entries[0] = %q, want 'e'", entries[0])
 	}
 }
 
@@ -390,17 +391,14 @@ func TestHandleConnect_Redirects(t *testing.T) {
 		subscribers: make(map[chan Event]struct{}),
 		commands:    make(chan Command, 16),
 		addr:        "192.168.1.1:4992",
+		dialFunc:    func(string) (*radio.Conn, error) { return nil, fmt.Errorf("mock dial fail") },
 	}
 
-	// doConnect will try to dial and fail, but the redirect should still happen.
-	// We need to intercept this. Since we can't easily mock radio.Dial,
-	// just test that the handler parses the form and redirects.
 	body := strings.NewReader("addr=192.168.1.1:4992&subs=slice&subs=pan")
 	req := httptest.NewRequest("POST", "/connect", body)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 
-	// This will try to dial and fail, but should still redirect.
 	hub.handleConnect(rec, req)
 
 	if rec.Code != 303 {

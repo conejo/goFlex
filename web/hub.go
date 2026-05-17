@@ -46,6 +46,9 @@ type Hub struct {
 	dialing   bool
 	addr      string
 
+	// dialFunc is injected for testing; defaults to radio.Dial.
+	dialFunc func(string) (*radio.Conn, error)
+
 	// Subscriptions
 	subs []subscription
 
@@ -108,6 +111,7 @@ func NewHub(cfg *config.Config) *Hub {
 		subscribers: make(map[chan Event]struct{}),
 		commands:    make(chan Command, 16),
 		addr:        fmt.Sprintf("%s:%d", cfg.RadioAddress, cfg.RadioPort),
+		dialFunc:    radio.Dial,
 	}
 	go h.startDiscovery()
 	go h.loop()
@@ -304,7 +308,7 @@ func (h *Hub) doConnect(addr string, subNames []string) {
 
 	h.broadcast(Event{Kind: "state", Data: "connecting"})
 
-	conn, err := radio.Dial(h.addr)
+	conn, err := h.dialFunc(h.addr)
 	if err != nil {
 		h.mu.Lock()
 		h.dialing = false
@@ -522,9 +526,9 @@ func (h *Hub) doRawCommand(cmd string) {
 func (h *Hub) appendLog(line string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.logBuf = append(h.logBuf, line)
+	h.logBuf = append([]string{line}, h.logBuf...)
 	if len(h.logBuf) > h.cfg.MaxLog {
-		h.logBuf = h.logBuf[len(h.logBuf)-h.cfg.MaxLog:]
+		h.logBuf = h.logBuf[:h.cfg.MaxLog]
 	}
 }
 
