@@ -1,6 +1,6 @@
 {{template "base.html" .}}
 {{define "content"}}
-<div class="max-w-5xl mx-auto" hx-ext="sse" sse-connect="/events">
+<div hx-ext="sse" sse-connect="/events">
     <!-- Status bar -->
     <div id="status-bar" sse-swap="status">
         {{template "status.html" .}}
@@ -8,12 +8,12 @@
 
     <div class="border-t border-[#414868] mb-3"></div>
 
-    <div class="flex gap-4">
+    <div class="flex gap-3">
         <!-- Left: Log + subs -->
         <div class="flex-1 min-w-0">
             <!-- Log pane -->
             <div id="log-pane" sse-swap="log"
-                 class="bg-[#24283b] rounded p-2 h-96 overflow-y-auto scrollbar mb-3">
+                 class="bg-[#24283b] rounded p-2 h-[36rem] overflow-y-auto scrollbar mb-3">
                 {{template "log.html" .}}
             </div>
 
@@ -24,22 +24,22 @@
         </div>
 
         <!-- Right: Slices + controls -->
-        <div class="w-80 flex-shrink-0 space-y-3">
+        <div class="w-64 flex-shrink-0 space-y-3">
             <!-- Frequency input -->
             <div class="bg-[#24283b] rounded p-3">
                 <h3 class="text-xs font-bold text-[#565f89] mb-2">Set Frequency</h3>
-                <form hx-post="/tune" hx-target="#log-pane" hx-swap="outerHTML" class="flex gap-2">
-                    <input type="text" name="freq" placeholder="14.300" class="flex-1">
-                    <button type="submit">Tune</button>
+                <form hx-post="/tune" hx-target="#log-pane" hx-swap="innerHTML" class="flex gap-2">
+                    <input type="text" name="freq" placeholder="14.300" class="flex-1 min-w-0">
+                    <button type="submit" class="flex-shrink-0">Tune</button>
                 </form>
             </div>
 
             <!-- Raw command -->
             <div class="bg-[#24283b] rounded p-3">
                 <h3 class="text-xs font-bold text-[#565f89] mb-2">Send Command</h3>
-                <form hx-post="/command" hx-target="#log-pane" hx-swap="outerHTML" class="flex gap-2">
-                    <input type="text" name="cmd" placeholder="sub slice all" class="flex-1">
-                    <button type="submit">Send</button>
+                <form hx-post="/command" hx-target="#log-pane" hx-swap="innerHTML" class="flex gap-2">
+                    <input type="text" name="cmd" placeholder="sub slice all" class="flex-1 min-w-0">
+                    <button type="submit" class="flex-shrink-0">Send</button>
                 </form>
             </div>
 

@@ -1,8 +1,8 @@
 <div class="bg-[#24283b] rounded p-3">
     <h3 class="text-xs font-bold text-[#565f89] mb-2">Subscriptions</h3>
-    <div class="grid grid-cols-4 gap-1">
+    <div class="grid grid-cols-8 gap-1">
         {{range .Subs}}
-        <form hx-post="/subscribe" hx-target="#subs-panel" hx-swap="outerHTML" class="contents">
+        <form hx-post="/subscribe" hx-target="#subs-panel" hx-swap="innerHTML" class="contents">
             <input type="hidden" name="name" value="{{.Name}}">
             <input type="hidden" name="checked" value="{{not .Checked}}">
             <button type="submit"

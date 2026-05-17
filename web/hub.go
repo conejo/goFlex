@@ -488,6 +488,8 @@ func (h *Hub) doSubscribe(name string, checked bool) {
 		}
 	}
 	h.mu.Unlock()
+
+	h.broadcast(Event{Kind: "state", Data: "subs"})
 }
 
 func (h *Hub) doTune(freqMHz string) {

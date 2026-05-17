@@ -31,8 +31,9 @@
     </script>
     <style>
         body { background-color: #1a1b26; color: #c0caf5; font-family: 'SF Mono', 'Fira Code', monospace; }
-        .log-line { font-size: 13px; line-height: 1.4; }
-        .log-line:hover { background-color: rgba(122, 162, 247, 0.05); }
+        .log-line { font-size: 13px; line-height: 1.4; padding: 4px 8px; border-bottom: 1px solid #414868; }
+        .log-line:nth-child(even) { background-color: #1f2335; }
+        .log-line:hover { background-color: rgba(122, 162, 247, 0.12); }
         .tx { color: #7aa2f7; }
         .rx { color: #e0af68; }
         .scrollbar::-webkit-scrollbar { width: 6px; }
@@ -57,7 +58,7 @@
         .checkbox-custom { accent-color: #7aa2f7; }
     </style>
 </head>
-<body class="min-h-screen p-4">
+<body class="min-h-screen p-2">
     {{block "content" .}}{{end}}
 </body>
 </html>
