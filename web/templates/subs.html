@@ -1,0 +1,15 @@
+<div class="bg-[#24283b] rounded p-3">
+    <h3 class="text-xs font-bold text-[#565f89] mb-2">Subscriptions</h3>
+    <div class="grid grid-cols-4 gap-1">
+        {{range .Subs}}
+        <form hx-post="/subscribe" hx-target="#subs-panel" hx-swap="outerHTML" class="contents">
+            <input type="hidden" name="name" value="{{.Name}}">
+            <input type="hidden" name="checked" value="{{not .Checked}}">
+            <button type="submit"
+                    class="text-xs p-1 rounded text-left w-full {{if .Checked}}bg-[#7aa2f7] text-[#1a1b26]{{else}}bg-[#1a1b26] text-[#565f89] hover:bg-[#414868]{{end}}">
+                {{if .Checked}}✓{{else}}○{{end}} {{.Label}}
+            </button>
+        </form>
+        {{end}}
+    </div>
+</div>
