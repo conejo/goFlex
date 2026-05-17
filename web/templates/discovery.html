@@ -1,0 +1,69 @@
+{{template "base.html" .}}
+{{define "content"}}
+<div>
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-4 p-3 bg-[#24283b] rounded">
+        <div class="flex items-center gap-3">
+            <span class="text-[#565f89] font-bold">Discovering…</span>
+            <span class="text-sm text-[#565f89]">{{.Status}}</span>
+        </div>
+        <span class="text-xs text-[#565f89]">goFlex v0.1</span>
+    </div>
+
+    {{if .ErrMsg}}
+    <div class="mb-4 p-3 bg-[#f7768e] bg-opacity-20 border border-[#f7768e] rounded text-sm text-[#f7768e]">
+        {{.ErrMsg}}
+    </div>
+    {{end}}
+
+    <div class="border-t border-[#414868] mb-4"></div>
+
+    <!-- Radio list -->
+    <div class="mb-4">
+        {{if .Radios}}
+        <form action="/connect" method="post">
+            <div class="space-y-1 mb-4">
+                {{range $i, $r := .Radios}}
+                <label class="flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-[#24283b] transition-colors">
+                    <input type="radio" name="addr" value="{{$r.Address}}:{{$r.Port}}"
+                           class="checkbox-custom" {{if eq $i 0}}checked{{end}}>
+                    <span class="text-sm w-32">{{$r.Model}}</span>
+                    <span class="text-sm w-40 text-[#7aa2f7]">{{$r.Address}}:{{$r.Port}}</span>
+                    <span class="text-sm {{if eq $r.Status "Available"}}text-[#9ece6a]{{else}}text-[#f7768e]{{end}}">
+                        {{$r.Status}}
+                    </span>
+                    {{if $r.Callsign}}<span class="text-xs text-[#565f89]">{{$r.Callsign}}</span>{{end}}
+                </label>
+                {{end}}
+            </div>
+
+            <!-- Subscriptions -->
+            <div class="bg-[#24283b] rounded p-3 mb-4">
+                <h3 class="text-sm font-bold text-[#565f89] mb-2">Subscriptions</h3>
+                <div class="grid grid-cols-3 gap-1">
+                    {{range .Subs}}
+                    <label class="flex items-center gap-2 text-sm p-1 rounded hover:bg-[#1a1b26] cursor-pointer">
+                        <input type="checkbox" name="subs" value="{{.Name}}"
+                               class="checkbox-custom" {{if .Checked}}checked{{end}}>
+                        <span class="{{if not .Checked}}text-[#565f89]{{end}}">{{.Label}}</span>
+                    </label>
+                    {{end}}
+                </div>
+            </div>
+
+            <button type="submit">Connect</button>
+        </form>
+        {{else}}
+        <div class="text-center py-12 text-[#565f89]">
+            <p class="text-lg mb-2">Scanning for radios…</p>
+            <p class="text-sm">Listening on UDP port 4992 for FlexRadio discovery broadcasts</p>
+        </div>
+        {{end}}
+    </div>
+
+    <!-- Help -->
+    <div class="text-xs text-[#565f89] mt-4">
+        Select a radio and subscriptions, then click Connect
+    </div>
+</div>
+{{end}}

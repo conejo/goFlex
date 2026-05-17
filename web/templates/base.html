@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>goFlex — FlexRadio Client</title>
+    <script src="/static/htmx.min.js"></script>
+    <script src="/static/htmx-ext-sse.js"></script>
+    <script src="/static/tailwindcss.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        radio: {
+                            bg: '#1a1b26',
+                            panel: '#24283b',
+                            border: '#414868',
+                            text: '#c0caf5',
+                            muted: '#565f89',
+                            accent: '#7aa2f7',
+                            green: '#9ece6a',
+                            red: '#f7768e',
+                            amber: '#e0af68',
+                            blue: '#7aa2f7',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #1a1b26; color: #c0caf5; font-family: 'SF Mono', 'Fira Code', monospace; }
+        .log-line { font-size: 13px; line-height: 1.4; padding: 4px 8px; border-bottom: 1px solid #414868; }
+        .log-line:nth-child(even) { background-color: #1f2335; }
+        .log-line:hover { background-color: rgba(122, 162, 247, 0.12); }
+        .tx { color: #7aa2f7; }
+        .rx { color: #e0af68; }
+        .scrollbar::-webkit-scrollbar { width: 6px; }
+        .scrollbar::-webkit-scrollbar-track { background: #24283b; }
+        .scrollbar::-webkit-scrollbar-thumb { background: #565f89; border-radius: 3px; }
+        input[type="text"], input[type="number"] {
+            background-color: #24283b; color: #c0caf5; border: 1px solid #414868;
+            padding: 4px 8px; border-radius: 4px; font-family: inherit;
+        }
+        input[type="text"]:focus, input[type="number"]:focus {
+            outline: none; border-color: #7aa2f7;
+        }
+        button, .btn {
+            background-color: #7aa2f7; color: #1a1b26; font-weight: bold;
+            padding: 6px 16px; border-radius: 4px; border: none; cursor: pointer;
+            font-family: inherit; font-size: 14px;
+        }
+        button:hover { background-color: #89b4fa; }
+        button:disabled { background-color: #565f89; cursor: not-allowed; }
+        button.danger { background-color: #f7768e; }
+        button.danger:hover { background-color: #f98da0; }
+        .checkbox-custom { accent-color: #7aa2f7; }
+    </style>
+</head>
+<body class="min-h-screen p-2">
+    {{block "content" .}}{{end}}
+</body>
+</html>

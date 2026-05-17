@@ -1,0 +1,14 @@
+<div class="flex items-center justify-between p-3 bg-[#24283b] rounded">
+    <div class="flex items-center gap-3">
+        <span class="text-[#9ece6a] font-bold">Connected</span>
+        {{if .ErrMsg}}
+        <span class="text-sm text-[#f7768e]">{{.ErrMsg}}</span>
+        {{else}}
+        <span class="text-sm text-[#9ece6a]">{{.Status}}</span>
+        {{end}}
+    </div>
+    <div class="flex items-center gap-4 text-xs text-[#565f89]">
+        <span>Handle: 0x{{printf "%X" .Handle}}</span>
+        <span>Version: {{.Version}}</span>
+    </div>
+</div>

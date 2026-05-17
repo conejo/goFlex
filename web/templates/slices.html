@@ -1,0 +1,35 @@
+{{if .Slices}}
+<div class="bg-[#24283b] rounded p-3">
+    <h3 class="text-xs font-bold text-[#565f89] mb-2">Slices</h3>
+    {{range $id, $props := .Slices}}
+    <div class="mb-2 p-2 bg-[#1a1b26] rounded text-xs">
+        <div class="text-[#7aa2f7] font-bold mb-1">Slice {{$id}}</div>
+        {{if index $props "RF_frequency"}}
+        <div class="flex justify-between">
+            <span class="text-[#565f89]">Freq</span>
+            <span>{{index $props "RF_frequency"}} MHz</span>
+        </div>
+        {{end}}
+        {{if index $props "mode"}}
+        <div class="flex justify-between">
+            <span class="text-[#565f89]">Mode</span>
+            <span>{{index $props "mode"}}</span>
+        </div>
+        {{end}}
+        {{if index $props "active"}}
+        <div class="flex justify-between">
+            <span class="text-[#565f89]">Active</span>
+            <span class="{{if eq (index $props "active") "1"}}text-[#9ece6a]{{else}}text-[#565f89]{{end}}">
+                {{if eq (index $props "active") "1"}}Yes{{else}}No{{end}}
+            </span>
+        </div>
+        {{end}}
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="bg-[#24283b] rounded p-3">
+    <h3 class="text-xs font-bold text-[#565f89] mb-2">Slices</h3>
+    <p class="text-xs text-[#565f89]">No slice data yet</p>
+</div>
+{{end}}

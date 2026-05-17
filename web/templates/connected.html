@@ -1,0 +1,58 @@
+{{template "base.html" .}}
+{{define "content"}}
+<div hx-ext="sse" sse-connect="/events">
+    <!-- Status bar -->
+    <div id="status-bar" sse-swap="status">
+        {{template "status.html" .}}
+    </div>
+
+    <div class="border-t border-[#414868] mb-3"></div>
+
+    <div class="flex gap-3">
+        <!-- Left: Log + subs -->
+        <div class="flex-1 min-w-0">
+            <!-- Log pane -->
+            <div id="log-pane" sse-swap="log"
+                 class="bg-[#24283b] rounded p-2 h-[36rem] overflow-y-auto scrollbar mb-3">
+                {{template "log.html" .}}
+            </div>
+
+            <!-- Subscriptions panel -->
+            <div id="subs-panel" sse-swap="subs">
+                {{template "subs.html" .}}
+            </div>
+        </div>
+
+        <!-- Right: Slices + controls -->
+        <div class="w-64 flex-shrink-0 space-y-3">
+            <!-- Frequency input -->
+            <div class="bg-[#24283b] rounded p-3">
+                <h3 class="text-xs font-bold text-[#565f89] mb-2">Set Frequency</h3>
+                <form hx-post="/tune" hx-target="#log-pane" hx-swap="innerHTML" class="flex gap-2">
+                    <input type="text" name="freq" placeholder="14.300" class="flex-1 min-w-0">
+                    <button type="submit" class="flex-shrink-0">Tune</button>
+                </form>
+            </div>
+
+            <!-- Raw command -->
+            <div class="bg-[#24283b] rounded p-3">
+                <h3 class="text-xs font-bold text-[#565f89] mb-2">Send Command</h3>
+                <form hx-post="/command" hx-target="#log-pane" hx-swap="innerHTML" class="flex gap-2">
+                    <input type="text" name="cmd" placeholder="sub slice all" class="flex-1 min-w-0">
+                    <button type="submit" class="flex-shrink-0">Send</button>
+                </form>
+            </div>
+
+            <!-- Slice data -->
+            <div id="slices-panel" sse-swap="slices">
+                {{template "slices.html" .}}
+            </div>
+
+            <!-- Disconnect -->
+            <form action="/disconnect" method="post">
+                <button type="submit" class="danger w-full">Disconnect</button>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}
