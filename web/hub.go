@@ -334,11 +334,12 @@ func (h *Hub) doConnect(addr string, subNames []string) {
 	for i := range h.subs {
 		h.subs[i].Checked = checked[h.subs[i].Name]
 	}
+	dialAddr := h.addr
 	h.mu.Unlock()
 
 	h.broadcast(Event{Kind: "state", Data: "connecting"})
 
-	conn, err := h.dialFunc(h.addr)
+	conn, err := h.dialFunc(dialAddr)
 	if err != nil {
 		h.mu.Lock()
 		h.dialing = false

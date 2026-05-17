@@ -181,6 +181,9 @@ type templateData struct {
 
 func (h *Hub) templateData() templateData {
 	handle, version := h.ConnInfo()
+	h.mu.RLock()
+	addr := h.addr
+	h.mu.RUnlock()
 	return templateData{
 		Connected:   h.IsConnected(),
 		Dialing:     h.IsDialing(),
@@ -193,6 +196,6 @@ func (h *Hub) templateData() templateData {
 		Slices:      h.GetSlices(),
 		Handle:      handle,
 		Version:     version,
-		Addr:        h.addr,
+		Addr:        addr,
 	}
 }
