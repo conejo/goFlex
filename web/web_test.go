@@ -499,17 +499,6 @@ func TestHandleCommand(t *testing.T) {
 	}
 }
 
-func TestHandleConnect_GetMethod(t *testing.T) {
-	hub := &Hub{}
-	req := httptest.NewRequest("GET", "/connect", nil)
-	rec := httptest.NewRecorder()
-	hub.handleConnect(rec, req)
-
-	if rec.Code != 405 {
-		t.Errorf("expected 405 for GET, got %d", rec.Code)
-	}
-}
-
 func TestHandleTune_EmptyFreq(t *testing.T) {
 	hub := &Hub{}
 	body := strings.NewReader("freq=")

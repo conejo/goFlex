@@ -82,24 +82,24 @@ func Serve(cfg *config.Config) error {
 	mux := http.NewServeMux()
 
 	// Page
-	mux.HandleFunc("/", hub.handleIndex)
+	mux.HandleFunc("GET /{$}", hub.handleIndex)
 
-	// Fragments (HTMX polling)
-	mux.HandleFunc("/discovery", hub.handleDiscovery)
-	mux.HandleFunc("/log", hub.handleLog)
-	mux.HandleFunc("/slices", hub.handleSlices)
-	mux.HandleFunc("/status", hub.handleStatus)
-	mux.HandleFunc("/subs", hub.handleSubsPanel)
+	// Fragments (SSE targets)
+	mux.HandleFunc("GET /discovery", hub.handleDiscovery)
+	mux.HandleFunc("GET /log", hub.handleLog)
+	mux.HandleFunc("GET /slices", hub.handleSlices)
+	mux.HandleFunc("GET /status", hub.handleStatus)
+	mux.HandleFunc("GET /subs", hub.handleSubsPanel)
 
 	// Actions
-	mux.HandleFunc("/connect", hub.handleConnect)
-	mux.HandleFunc("/disconnect", hub.handleDisconnect)
-	mux.HandleFunc("/subscribe", hub.handleSubscribe)
-	mux.HandleFunc("/tune", hub.handleTune)
-	mux.HandleFunc("/command", hub.handleCommand)
+	mux.HandleFunc("POST /connect", hub.handleConnect)
+	mux.HandleFunc("POST /disconnect", hub.handleDisconnect)
+	mux.HandleFunc("POST /subscribe", hub.handleSubscribe)
+	mux.HandleFunc("POST /tune", hub.handleTune)
+	mux.HandleFunc("POST /command", hub.handleCommand)
 
 	// SSE
-	mux.HandleFunc("/events", hub.handleEvents)
+	mux.HandleFunc("GET /events", hub.handleEvents)
 
 	// Static assets
 	mux.Handle("/static/", http.FileServer(http.FS(templateFS)))

@@ -46,10 +46,6 @@ func (h *Hub) handleSubsPanel(w http.ResponseWriter, r *http.Request) {
 // ─── Action handlers ───────────────────────────────────────────────────────
 
 func (h *Hub) handleConnect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	r.ParseForm()
 	addr := r.FormValue("addr")
 	subNames := r.Form["subs"]
@@ -61,20 +57,12 @@ func (h *Hub) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) handleDisconnect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	// Run disconnect synchronously so state is updated before the redirect.
 	h.doDisconnect()
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (h *Hub) handleSubscribe(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	r.ParseForm()
 	name := r.FormValue("name")
 	checked := r.FormValue("checked") == "true"
@@ -89,10 +77,6 @@ func (h *Hub) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) handleTune(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	r.ParseForm()
 	freq := r.FormValue("freq")
 	if freq == "" {
@@ -105,10 +89,6 @@ func (h *Hub) handleTune(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) handleCommand(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	r.ParseForm()
 	cmd := r.FormValue("cmd")
 	if cmd == "" {
