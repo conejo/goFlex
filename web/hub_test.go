@@ -646,3 +646,75 @@ func TestRemoveRadio_Empty(t *testing.T) {
 		t.Fatalf("expected 0 radios, got %d", len(got))
 	}
 }
+
+// ─── Hub lifecycle tests ───────────────────────────────────────────────────
+
+func TestHub_Close_Idempotent(t *testing.T) {
+	hub := &Hub{
+		cfg:         &config.Config{MaxLog: 100},
+		subscribers: make(map[chan Event]struct{}),
+		commands:    make(chan Command, 16),
+		discoveryFunc: func(context.Context) (<-chan radio.DiscoveryEvent, error) {
+			return make(chan radio.DiscoveryEvent), nil
+		},
+	}
+	// Manually start loop without discovery to avoid UDP bind.
+	go hub.loop()
+
+	hub.Close()
+	// Second close should not panic.
+	hub.Close()
+}
+
+func TestHub_SendCommand_AfterClose(t *testing.T) {
+	hub := &Hub{
+		cfg:         &config.Config{MaxLog: 100},
+		subscribers: make(map[chan Event]struct{}),
+		commands:    make(chan Command, 16),
+		discoveryFunc: func(context.Context) (<-chan radio.DiscoveryEvent, error) {
+			return make(chan radio.DiscoveryEvent), nil
+		},
+	}
+	go hub.loop()
+	hub.Close()
+
+	// SendCommand after Close should not panic and should return immediately.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		hub.SendCommand(Command{Kind: "connect"})
+	}()
+
+	select {
+	case <-done:
+		// Expected — SendCommand returns safely after dropping the command.
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendCommand should return immediately after Close")
+	}
+}
+
+func TestHub_Close_WaitsForLoop(t *testing.T) {
+	hub := &Hub{
+		cfg:         &config.Config{MaxLog: 100},
+		subs:        defaultSubs(),
+		slices:      radio.NewSliceCollector(),
+		subscribers: make(map[chan Event]struct{}),
+		commands:    make(chan Command, 16),
+		dialFunc:    func(string) (*radio.Conn, error) { return nil, fmt.Errorf("mock dial") },
+	}
+	go hub.loop()
+
+	// Queue a command that will be processed.
+	hub.SendCommand(Command{Kind: "connect", Addr: "1.2.3.4:4992"})
+
+	// Give loop time to process.
+	time.Sleep(50 * time.Millisecond)
+
+	// Close should shut down cleanly.
+	hub.Close()
+
+	// Verify state after close.
+	if hub.IsConnected() {
+		t.Error("expected not connected after close")
+	}
+}

@@ -86,6 +86,9 @@ type Hub struct {
 
 	// Command channel from HTTP handlers
 	commands chan Command
+
+	// closeOnce ensures Close is idempotent.
+	closeOnce sync.Once
 }
 
 type subscription struct {
@@ -139,14 +142,22 @@ func NewHub(cfg *config.Config) *Hub {
 }
 
 // SendCommand queues a command for the event loop.
+// It silently drops the command if the Hub has been closed.
 func (h *Hub) SendCommand(cmd Command) {
+	defer func() {
+		if recover() != nil {
+			// Channel was closed — ignore.
+		}
+	}()
 	h.commands <- cmd
 }
 
 // Close stops the discovery goroutine and shuts down the event loop.
 func (h *Hub) Close() {
 	h.stopDiscovery()
-	close(h.commands)
+	h.closeOnce.Do(func() {
+		close(h.commands)
+	})
 }
 
 // ─── Read accessors (thread-safe) ──────────────────────────────────────────
