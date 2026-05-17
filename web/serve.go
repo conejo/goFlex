@@ -13,6 +13,7 @@ import (
 )
 
 //go:embed templates/*
+//go:embed static/*
 var templateFS embed.FS
 
 var (
@@ -99,6 +100,9 @@ func Serve(cfg *config.Config) error {
 
 	// SSE
 	mux.HandleFunc("/events", hub.handleEvents)
+
+	// Static assets
+	mux.Handle("/static/", http.FileServer(http.FS(templateFS)))
 
 	addr := ":8080"
 	log.Printf("goFlex web UI starting on http://localhost%s", addr)
