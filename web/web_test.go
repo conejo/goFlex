@@ -1,11 +1,12 @@
 package web
 
 import (
-	"bytes"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"goFlex/config"
 	"goFlex/radio"
@@ -104,55 +105,6 @@ func TestRenderToString_SlicesTemplate_WithData(t *testing.T) {
 	}
 	if !strings.Contains(html, "USB") {
 		t.Errorf("expected 'USB' in output, got: %s", html)
-	}
-}
-
-// ─── SSE wire format tests ─────────────────────────────────────────────────
-
-func TestWriteSSEFragment_ProducesValidSSE(t *testing.T) {
-	var buf bytes.Buffer
-	html := `<div class="log-line">test</div>
-<div class="log-line">test2</div>`
-
-	// Simulate what writeSSEFragment does.
-	fmtPrintSSE(&buf, "log", html)
-
-	output := buf.String()
-	t.Logf("SSE output:\n%s", output)
-
-	// Must start with "event: log\n"
-	if !strings.HasPrefix(output, "event: log\n") {
-		t.Errorf("SSE output must start with 'event: log\\n', got: %q", output)
-	}
-	// Must contain data: lines
-	if !strings.Contains(output, "data:") {
-		t.Errorf("SSE output must contain 'data:' lines, got: %q", output)
-	}
-	// Must end with \n\n (double newline terminates the event)
-	if !strings.HasSuffix(output, "\n\n") {
-		t.Errorf("SSE output must end with '\\n\\n', got: %q", output)
-	}
-	// Must contain the HTML content
-	if !strings.Contains(output, "test") {
-		t.Errorf("SSE output must contain 'test', got: %q", output)
-	}
-}
-
-// fmtPrintSSE replicates writeSSEFragment logic for testing.
-func fmtPrintSSE(w *bytes.Buffer, event, html string) {
-	w.WriteString("event: " + event + "\n")
-	for _, line := range strings.Split(html, "\n") {
-		w.WriteString("data: " + line + "\n")
-	}
-	w.WriteString("\n")
-}
-
-func TestWriteSSEFragment_EmptyHTML(t *testing.T) {
-	var buf bytes.Buffer
-	fmtPrintSSE(&buf, "log", "")
-	output := buf.String()
-	if !strings.Contains(output, "event: log") {
-		t.Errorf("expected event line, got: %q", output)
 	}
 }
 
@@ -522,5 +474,442 @@ func TestHandleCommand_EmptyCmd(t *testing.T) {
 
 	if rec.Code != 400 {
 		t.Errorf("expected 400 for empty cmd, got %d", rec.Code)
+	}
+}
+
+// ─── render() tests ────────────────────────────────────────────────────────
+
+func TestRender_LogTemplate(t *testing.T) {
+	rec := httptest.NewRecorder()
+	render(rec, "log.html", templateData{LogEntries: []string{"test line"}})
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "test line") {
+		t.Errorf("expected 'test line' in output, got: %s", rec.Body.String())
+	}
+}
+
+// ─── Fragment handler tests ────────────────────────────────────────────────
+
+func TestHandleDiscovery(t *testing.T) {
+	hub := &Hub{
+		cfg:    &config.Config{MaxLog: 100},
+		subs:   defaultSubs(),
+		slices: radio.NewSliceCollector(),
+	}
+	req := httptest.NewRequest("GET", "/discovery", nil)
+	rec := httptest.NewRecorder()
+	hub.handleDiscovery(rec, req)
+	if rec.Code != 200 {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandleSlices(t *testing.T) {
+	hub := &Hub{
+		cfg:    &config.Config{MaxLog: 100},
+		slices: radio.NewSliceCollector(),
+	}
+	req := httptest.NewRequest("GET", "/slices", nil)
+	rec := httptest.NewRecorder()
+	hub.handleSlices(rec, req)
+	if rec.Code != 200 {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "No slice data yet") {
+		t.Errorf("expected empty slices message, got: %s", rec.Body.String())
+	}
+}
+
+func TestHandleSubsPanel(t *testing.T) {
+	hub := &Hub{
+		cfg:    &config.Config{MaxLog: 100},
+		subs:   defaultSubs(),
+		slices: radio.NewSliceCollector(),
+	}
+	req := httptest.NewRequest("GET", "/subs", nil)
+	rec := httptest.NewRecorder()
+	hub.handleSubsPanel(rec, req)
+	if rec.Code != 200 {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Slice") {
+		t.Errorf("expected subs panel with 'Slice', got: %s", rec.Body.String())
+	}
+}
+
+// ─── SSE wire format tests (real method) ───────────────────────────────────
+
+// flusherRecorder wraps httptest.ResponseRecorder to implement http.Flusher.
+type flusherRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (f *flusherRecorder) Flush() {}
+
+func TestHub_WriteSSEFragment(t *testing.T) {
+	hub := &Hub{}
+	rec := &flusherRecorder{httptest.NewRecorder()}
+	hub.writeSSEFragment(rec, rec, "log", "<div class=\"log-line\">test</div>")
+
+	out := rec.Body.String()
+	if !strings.HasPrefix(out, "event: log\n") {
+		t.Errorf("SSE output must start with 'event: log\\n', got: %q", out)
+	}
+	if !strings.Contains(out, "data: ") {
+		t.Errorf("SSE output must contain 'data:' lines, got: %q", out)
+	}
+	if !strings.HasSuffix(out, "\n\n") {
+		t.Errorf("SSE output must end with '\\n\\n', got: %q", out)
+	}
+}
+
+func TestHub_WriteSSEFragment_EmptyHTML(t *testing.T) {
+	hub := &Hub{}
+	rec := &flusherRecorder{httptest.NewRecorder()}
+	hub.writeSSEFragment(rec, rec, "log", "")
+
+	out := rec.Body.String()
+	if !strings.Contains(out, "event: log") {
+		t.Errorf("expected event line, got: %q", out)
+	}
+}
+
+// ─── Hub helper tests ──────────────────────────────────────────────────────
+
+func TestHub_ConnInfo(t *testing.T) {
+	hub := &Hub{conn: &radio.Conn{Handle: 0xABCD, Version: "3.0.0"}}
+	handle, version := hub.ConnInfo()
+	if handle != 0xABCD {
+		t.Errorf("handle = 0x%X, want 0xABCD", handle)
+	}
+	if version != "3.0.0" {
+		t.Errorf("version = %q, want '3.0.0'", version)
+	}
+}
+
+func TestHub_ConnInfo_Nil(t *testing.T) {
+	hub := &Hub{}
+	handle, version := hub.ConnInfo()
+	if handle != 0 {
+		t.Errorf("handle = 0x%X, want 0", handle)
+	}
+	if version != "" {
+		t.Errorf("version = %q, want empty", version)
+	}
+}
+
+func TestHub_UpsertRadio(t *testing.T) {
+	r1 := radio.DiscoveredRadio{Serial: "S1", Model: "6600"}
+	r2 := radio.DiscoveredRadio{Serial: "S2", Model: "6400"}
+
+	list := upsertRadio(nil, r1)
+	if len(list) != 1 {
+		t.Fatalf("expected 1 radio, got %d", len(list))
+	}
+
+	list = upsertRadio(list, r2)
+	if len(list) != 2 {
+		t.Fatalf("expected 2 radios, got %d", len(list))
+	}
+
+	updated := radio.DiscoveredRadio{Serial: "S1", Model: "6700"}
+	list = upsertRadio(list, updated)
+	if len(list) != 2 {
+		t.Fatalf("expected 2 radios after upsert, got %d", len(list))
+	}
+	if list[0].Model != "6700" {
+		t.Errorf("expected updated model '6700', got %q", list[0].Model)
+	}
+}
+
+func TestHub_RemoveRadio(t *testing.T) {
+	r1 := radio.DiscoveredRadio{Serial: "S1"}
+	r2 := radio.DiscoveredRadio{Serial: "S2"}
+	list := []radio.DiscoveredRadio{r1, r2}
+
+	list = removeRadio(list, "S1")
+	if len(list) != 1 {
+		t.Fatalf("expected 1 radio after removal, got %d", len(list))
+	}
+	if list[0].Serial != "S2" {
+		t.Errorf("expected serial 'S2', got %q", list[0].Serial)
+	}
+
+	list = removeRadio(list, "missing")
+	if len(list) != 1 {
+		t.Fatalf("expected 1 radio after no-op removal, got %d", len(list))
+	}
+}
+
+func TestHub_DoDisconnect(t *testing.T) {
+	hub := &Hub{
+		cfg:       &config.Config{MaxLog: 100},
+		connected: true,
+		conn:      &radio.Conn{},
+		status:    "Connected",
+	}
+	hub.doDisconnect()
+	if hub.IsConnected() {
+		t.Error("expected disconnected")
+	}
+	if hub.Status() != "Disconnected" {
+		t.Errorf("status = %q, want 'Disconnected'", hub.Status())
+	}
+}
+
+// ─── processCommand tests ──────────────────────────────────────────────────
+
+func TestHub_ProcessCommand_Connect(t *testing.T) {
+	hub := &Hub{
+		cfg:      &config.Config{MaxLog: 100},
+		addr:     "192.168.1.1:4992",
+		dialFunc: func(string) (*radio.Conn, error) { return nil, fmt.Errorf("mock dial fail") },
+	}
+	hub.processCommand(Command{Kind: "connect", Addr: "192.168.1.1:4992"})
+	// Should set dialing then fail; status should reflect error.
+	if hub.IsDialing() {
+		t.Error("expected dialing to be false after failed connect")
+	}
+}
+
+func TestHub_ProcessCommand_Disconnect(t *testing.T) {
+	hub := &Hub{
+		cfg:       &config.Config{MaxLog: 100},
+		connected: true,
+		conn:      &radio.Conn{},
+	}
+	hub.processCommand(Command{Kind: "disconnect"})
+	if hub.IsConnected() {
+		t.Error("expected disconnected after processCommand")
+	}
+}
+
+func TestHub_ProcessCommand_Subscribe(t *testing.T) {
+	hub := &Hub{
+		cfg:  &config.Config{MaxLog: 100},
+		subs: defaultSubs(),
+	}
+	// Toggle slice from true to false.
+	hub.processCommand(Command{Kind: "subscribe", Name: "slice", Val: "false"})
+	for _, s := range hub.Subs() {
+		if s.Name == "slice" && s.Checked {
+			t.Error("expected slice to be unchecked")
+		}
+	}
+}
+
+// ─── NewMux routing tests ─────────────────────────────────────────────────
+
+func TestNewMux_Routes(t *testing.T) {
+	hub := &Hub{
+		cfg:    &config.Config{MaxLog: 100},
+		subs:   defaultSubs(),
+		slices: radio.NewSliceCollector(),
+	}
+	mux := NewMux(hub)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/")
+	if err != nil {
+		t.Fatalf("GET / failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("GET / = %d, want 200", resp.StatusCode)
+	}
+
+	resp, err = http.Get(server.URL + "/log")
+	if err != nil {
+		t.Fatalf("GET /log failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("GET /log = %d, want 200", resp.StatusCode)
+	}
+}
+
+// ─── SSE endpoint tests ────────────────────────────────────────────────────
+
+// mockFlusher wraps httptest.ResponseRecorder to implement http.Flusher.
+type mockFlusher struct {
+	*httptest.ResponseRecorder
+}
+
+func (f *mockFlusher) Flush() {}
+
+func TestHandleEvents_InitialState(t *testing.T) {
+	hub := &Hub{
+		cfg:         &config.Config{MaxLog: 100},
+		subs:        defaultSubs(),
+		slices:      radio.NewSliceCollector(),
+		subscribers: make(map[chan Event]struct{}),
+		connected:   true,
+		status:      "Connected  handle=0xABCD  version=3.0.0",
+	}
+
+	rec := &mockFlusher{httptest.NewRecorder()}
+	req := httptest.NewRequest("GET", "/events", nil)
+
+	// Run handler in goroutine because it blocks.
+	go hub.handleEvents(rec, req)
+
+	// Wait a bit for initial fragments to be written.
+	time.Sleep(50 * time.Millisecond)
+
+	out := rec.Body.String()
+	if !strings.Contains(out, "event: status") {
+		t.Errorf("expected initial status event, got: %q", out[:200])
+	}
+	if !strings.Contains(out, "event: log") {
+		t.Errorf("expected initial log event, got: %q", out[:200])
+	}
+	if !strings.Contains(out, "event: subs") {
+		t.Errorf("expected initial subs event, got: %q", out[:200])
+	}
+	if !strings.Contains(out, "event: slices") {
+		t.Errorf("expected initial slices event, got: %q", out[:200])
+	}
+}
+
+func TestHandleEvents_Broadcast(t *testing.T) {
+	hub := &Hub{
+		cfg:         &config.Config{MaxLog: 100},
+		subs:        defaultSubs(),
+		slices:      radio.NewSliceCollector(),
+		subscribers: make(map[chan Event]struct{}),
+		connected:   true,
+		status:      "Connected",
+		logBuf:      []string{"test log"},
+	}
+
+	rec := &mockFlusher{httptest.NewRecorder()}
+	req := httptest.NewRequest("GET", "/events", nil)
+
+	go hub.handleEvents(rec, req)
+	time.Sleep(50 * time.Millisecond)
+
+	// Clear initial output.
+	rec.Body.Reset()
+
+	// Broadcast a log event.
+	hub.broadcast(Event{Kind: "log", Data: "new line"})
+	time.Sleep(50 * time.Millisecond)
+
+	out := rec.Body.String()
+	if !strings.Contains(out, "event: log") {
+		t.Errorf("expected log event after broadcast, got: %q", out[:200])
+	}
+	if !strings.Contains(out, "test log") {
+		t.Errorf("expected rendered log content, got: %q", out[:200])
+	}
+}
+
+// ─── RadioConn interface tests ─────────────────────────────────────────────
+
+type mockRadioConn struct {
+	sendCalled   bool
+	sendCmd      string
+	enableRecon  bool
+	disableRecon bool
+	closeCalled  bool
+	handle       uint32
+	version      string
+	state        radio.ConnectionState
+}
+
+func (m *mockRadioConn) Send(cmd string, cb func(int, string)) (uint32, error) {
+	m.sendCalled = true
+	m.sendCmd = cmd
+	return 1, nil
+}
+
+func (m *mockRadioConn) EnableReconnect()                         { m.enableRecon = true }
+func (m *mockRadioConn) DisableReconnect()                        { m.disableRecon = true }
+func (m *mockRadioConn) Close()                                   { m.closeCalled = true }
+func (m *mockRadioConn) ReadLoop(func(radio.ParsedMessage)) error { return nil }
+func (m *mockRadioConn) ReconnectDone() <-chan struct{}           { return nil }
+func (m *mockRadioConn) State() radio.ConnectionState             { return m.state }
+func (m *mockRadioConn) GetHandle() uint32                        { return m.handle }
+func (m *mockRadioConn) GetVersion() string                       { return m.version }
+
+func TestHub_DoSubscribe_WithMockConn(t *testing.T) {
+	mock := &mockRadioConn{handle: 0x1234, version: "3.0.0"}
+	hub := &Hub{
+		cfg:  &config.Config{MaxLog: 100},
+		subs: defaultSubs(),
+		conn: mock,
+	}
+
+	hub.doSubscribe("slice", false)
+
+	if !mock.sendCalled {
+		t.Error("expected Send to be called on mock conn")
+	}
+	if mock.sendCmd != "unsub slice all" {
+		t.Errorf("expected 'unsub slice all', got %q", mock.sendCmd)
+	}
+
+	for _, s := range hub.Subs() {
+		if s.Name == "slice" && s.Checked {
+			t.Error("expected slice to be unchecked")
+		}
+	}
+}
+
+func TestHub_DoTune_WithMockConn(t *testing.T) {
+	mock := &mockRadioConn{}
+	hub := &Hub{
+		cfg:  &config.Config{MaxLog: 100},
+		conn: mock,
+	}
+
+	hub.doTune("14.300")
+
+	if !mock.sendCalled {
+		t.Error("expected Send to be called on mock conn")
+	}
+	if mock.sendCmd != "slice tune 0 14.300 autopan=0" {
+		t.Errorf("expected tune command, got %q", mock.sendCmd)
+	}
+}
+
+func TestHub_DoRawCommand_WithMockConn(t *testing.T) {
+	mock := &mockRadioConn{}
+	hub := &Hub{
+		cfg:  &config.Config{MaxLog: 100},
+		conn: mock,
+	}
+
+	hub.doRawCommand("sub pan all")
+
+	if !mock.sendCalled {
+		t.Error("expected Send to be called on mock conn")
+	}
+	if mock.sendCmd != "sub pan all" {
+		t.Errorf("expected 'sub pan all', got %q", mock.sendCmd)
+	}
+}
+
+func TestHub_DoDisconnect_WithMockConn(t *testing.T) {
+	mock := &mockRadioConn{}
+	hub := &Hub{
+		cfg:       &config.Config{MaxLog: 100},
+		connected: true,
+		conn:      mock,
+	}
+
+	hub.doDisconnect()
+
+	if !mock.disableRecon {
+		t.Error("expected DisableReconnect to be called")
+	}
+	if !mock.closeCalled {
+		t.Error("expected Close to be called")
+	}
+	if hub.IsConnected() {
+		t.Error("expected disconnected")
 	}
 }

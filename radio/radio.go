@@ -140,6 +140,12 @@ func (rc *Conn) State() ConnectionState {
 	return ConnectionState(rc.state.Load())
 }
 
+// GetHandle returns the radio handle assigned during handshake.
+func (rc *Conn) GetHandle() uint32 { return rc.Handle }
+
+// GetVersion returns the radio firmware version from the handshake.
+func (rc *Conn) GetVersion() string { return rc.Version }
+
 func (rc *Conn) setState(s ConnectionState) {
 	old := ConnectionState(rc.state.Swap(int32(s)))
 	if old != s && rc.OnStateChange != nil {
@@ -375,7 +381,9 @@ func (rc *Conn) stopReconnect() {
 		rc.reconnectTimer = nil
 	}
 	rc.reconnectStopOnce.Do(func() {
-		close(rc.reconnectStopCh)
+		if rc.reconnectStopCh != nil {
+			close(rc.reconnectStopCh)
+		}
 	})
 	// Signal any waiter on ReconnectDone that reconnect won't happen.
 	if rc.reconnectDoneCh != nil {

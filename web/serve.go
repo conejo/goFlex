@@ -75,10 +75,8 @@ func renderToString(name string, data templateData) string {
 	return buf.String()
 }
 
-// Serve starts the HTTP server with the given config.
-func Serve(cfg *config.Config) error {
-	hub := NewHub(cfg)
-
+// NewMux returns an http.Handler with all routes wired to the given Hub.
+func NewMux(hub *Hub) http.Handler {
 	mux := http.NewServeMux()
 
 	// Page
@@ -104,11 +102,18 @@ func Serve(cfg *config.Config) error {
 	// Static assets
 	mux.Handle("/static/", http.FileServer(http.FS(templateFS)))
 
+	return mux
+}
+
+// Serve starts the HTTP server with the given config.
+func Serve(cfg *config.Config) error {
+	hub := NewHub(cfg)
+
 	addr := ":8080"
 	log.Printf("goFlex web UI starting on http://localhost%s", addr)
 	log.Printf("Radio: %s:%d", cfg.RadioAddress, cfg.RadioPort)
 
 	// Clean shutdown on interrupt is handled by the OS; the radio conn
 	// will be closed when the process exits.
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, NewMux(hub))
 }
