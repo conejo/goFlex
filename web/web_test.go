@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -810,14 +811,17 @@ func TestHandleEvents_Broadcast(t *testing.T) {
 // ─── RadioConn interface tests ─────────────────────────────────────────────
 
 type mockRadioConn struct {
-	sendCalled   bool
-	sendCmd      string
-	enableRecon  bool
-	disableRecon bool
-	closeCalled  bool
-	handle       uint32
-	version      string
-	state        radio.ConnectionState
+	sendCalled    bool
+	sendCmd       string
+	enableRecon   bool
+	disableRecon  bool
+	closeCalled   bool
+	handle        uint32
+	version       string
+	state         radio.ConnectionState
+	OnLog         func(string, string)
+	OnStateChange func(radio.ConnectionState, radio.ConnectionState)
+	OnPingRtt     func(int)
 }
 
 func (m *mockRadioConn) Send(cmd string, cb func(int, string)) (uint32, error) {
@@ -834,6 +838,11 @@ func (m *mockRadioConn) ReconnectDone() <-chan struct{}           { return nil }
 func (m *mockRadioConn) State() radio.ConnectionState             { return m.state }
 func (m *mockRadioConn) GetHandle() uint32                        { return m.handle }
 func (m *mockRadioConn) GetVersion() string                       { return m.version }
+func (m *mockRadioConn) SetOnLog(fn func(string, string))         { m.OnLog = fn }
+func (m *mockRadioConn) SetOnStateChange(fn func(radio.ConnectionState, radio.ConnectionState)) {
+	m.OnStateChange = fn
+}
+func (m *mockRadioConn) SetOnPingRtt(fn func(int)) { m.OnPingRtt = fn }
 
 func TestHub_DoSubscribe_WithMockConn(t *testing.T) {
 	mock := &mockRadioConn{handle: 0x1234, version: "3.0.0"}
@@ -911,5 +920,120 @@ func TestHub_DoDisconnect_WithMockConn(t *testing.T) {
 	}
 	if hub.IsConnected() {
 		t.Error("expected disconnected")
+	}
+}
+
+// ─── render() error path test ──────────────────────────────────────────────
+
+func TestRender_MissingTemplate(t *testing.T) {
+	rec := httptest.NewRecorder()
+	render(rec, "nonexistent.html", templateData{})
+	if rec.Code != 500 {
+		t.Errorf("expected 500 for missing template, got %d", rec.Code)
+	}
+}
+
+// ─── Table-driven read accessor tests ──────────────────────────────────────
+
+func TestHub_ReadAccessors(t *testing.T) {
+	hub := &Hub{
+		cfg:         &config.Config{MaxLog: 100},
+		radios:      []radio.DiscoveredRadio{{Serial: "S1", Model: "6600"}},
+		discovering: true,
+		connected:   true,
+		dialing:     true,
+		status:      "Connected",
+		errMsg:      "some error",
+		subs:        []subscription{{Name: "slice", Checked: true}},
+	}
+
+	tests := []struct {
+		name string
+		got  interface{}
+		want interface{}
+	}{
+		{"Radios", len(hub.Radios()), 1},
+		{"IsDiscovering", hub.IsDiscovering(), true},
+		{"IsConnected", hub.IsConnected(), true},
+		{"IsDialing", hub.IsDialing(), true},
+		{"Status", hub.Status(), "Connected"},
+		{"ErrMsg", hub.ErrMsg(), "some error"},
+		{"Subs", len(hub.Subs()), 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("%s = %v, want %v", tt.name, tt.got, tt.want)
+			}
+		})
+	}
+}
+
+// ─── Discovery injection tests ─────────────────────────────────────────────
+
+func TestHub_StartDiscovery_Mock(t *testing.T) {
+	ch := make(chan radio.DiscoveryEvent, 2)
+	ch <- radio.DiscoveryEvent{Radio: radio.DiscoveredRadio{Serial: "S1", Model: "6600"}}
+	close(ch)
+
+	hub := &Hub{
+		cfg:           &config.Config{MaxLog: 100},
+		subscribers:   make(map[chan Event]struct{}),
+		discoveryFunc: func(context.Context) (<-chan radio.DiscoveryEvent, error) { return ch, nil },
+	}
+
+	hub.startDiscovery()
+	time.Sleep(50 * time.Millisecond)
+
+	if !hub.IsDiscovering() {
+		t.Error("expected discovering to be true")
+	}
+	if len(hub.Radios()) != 1 {
+		t.Errorf("expected 1 radio, got %d", len(hub.Radios()))
+	}
+}
+
+func TestHub_StopDiscovery(t *testing.T) {
+	hub := &Hub{
+		cfg:         &config.Config{MaxLog: 100},
+		discovering: true,
+	}
+	hub.stopDiscovery()
+	if hub.IsDiscovering() {
+		t.Error("expected discovering to be false after stop")
+	}
+}
+
+// ─── wireCallbacks test ────────────────────────────────────────────────────
+
+func TestHub_WireCallbacks(t *testing.T) {
+	mock := &mockRadioConn{}
+	hub := &Hub{
+		cfg:         &config.Config{MaxLog: 100},
+		subscribers: make(map[chan Event]struct{}),
+	}
+
+	hub.wireCallbacks(mock)
+
+	// Trigger OnLog callback.
+	mock.OnLog("tx", "test command")
+	entries := hub.LogEntries()
+	if len(entries) != 1 || entries[0] != "→ test command" {
+		t.Errorf("expected log entry from OnLog callback, got %v", entries)
+	}
+
+	// Trigger OnStateChange callback.
+	mock.OnStateChange(radio.StateDisconnected, radio.StateConnected)
+	entries = hub.LogEntries()
+	if len(entries) != 2 { // OnLog + state change
+		t.Errorf("expected 2 log entries after state change, got %d", len(entries))
+	}
+
+	// Trigger OnPingRtt callback.
+	mock.OnPingRtt(42)
+	entries = hub.LogEntries()
+	if len(entries) != 3 {
+		t.Errorf("expected 3 log entries after ping, got %d", len(entries))
 	}
 }
