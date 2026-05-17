@@ -1,11 +1,13 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -734,12 +736,55 @@ func TestNewMux_Routes(t *testing.T) {
 
 // ─── SSE endpoint tests ────────────────────────────────────────────────────
 
-// mockFlusher wraps httptest.ResponseRecorder to implement http.Flusher.
-type mockFlusher struct {
-	*httptest.ResponseRecorder
+// safeBuffer wraps bytes.Buffer with a mutex for thread-safe access.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
 }
 
-func (f *mockFlusher) Flush() {}
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *safeBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
+// safeRecorder is a thread-safe ResponseRecorder for testing SSE handlers.
+type safeRecorder struct {
+	Code      int
+	HeaderMap http.Header
+	Body      *safeBuffer
+	Flushed   bool
+}
+
+func newSafeRecorder() *safeRecorder {
+	return &safeRecorder{
+		Code:      200,
+		HeaderMap: make(http.Header),
+		Body:      &safeBuffer{},
+	}
+}
+
+func (r *safeRecorder) Header() http.Header { return r.HeaderMap }
+
+func (r *safeRecorder) Write(p []byte) (int, error) {
+	return r.Body.Write(p)
+}
+
+func (r *safeRecorder) WriteHeader(code int) { r.Code = code }
+
+func (r *safeRecorder) Flush() { r.Flushed = true }
 
 func TestHandleEvents_InitialState(t *testing.T) {
 	hub := &Hub{
@@ -751,7 +796,7 @@ func TestHandleEvents_InitialState(t *testing.T) {
 		status:      "Connected  handle=0xABCD  version=3.0.0",
 	}
 
-	rec := &mockFlusher{httptest.NewRecorder()}
+	rec := newSafeRecorder()
 	req := httptest.NewRequest("GET", "/events", nil)
 
 	// Run handler in goroutine because it blocks.
@@ -786,7 +831,7 @@ func TestHandleEvents_Broadcast(t *testing.T) {
 		logBuf:      []string{"test log"},
 	}
 
-	rec := &mockFlusher{httptest.NewRecorder()}
+	rec := newSafeRecorder()
 	req := httptest.NewRequest("GET", "/events", nil)
 
 	go hub.handleEvents(rec, req)
