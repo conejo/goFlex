@@ -441,14 +441,18 @@ func (h *Hub) readLoopAgain(conn *radio.Conn) {
 
 func (h *Hub) doDisconnect() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.conn != nil {
-		h.conn.Close()
-		h.conn = nil
-	}
+	conn := h.conn
+	h.conn = nil
 	h.connected = false
 	h.dialing = false
 	h.status = "Disconnected"
+	h.mu.Unlock()
+
+	if conn != nil {
+		conn.DisableReconnect()
+		conn.Close()
+	}
+
 	h.broadcast(Event{Kind: "state", Data: "disconnected"})
 }
 

@@ -65,7 +65,8 @@ func (h *Hub) handleDisconnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	h.SendCommand(Command{Kind: "disconnect"})
+	// Run disconnect synchronously so state is updated before the redirect.
+	h.doDisconnect()
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
