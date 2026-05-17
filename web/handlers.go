@@ -46,7 +46,10 @@ func (h *Hub) handleSubsPanel(w http.ResponseWriter, r *http.Request) {
 // ─── Action handlers ───────────────────────────────────────────────────────
 
 func (h *Hub) handleConnect(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 	addr := r.FormValue("addr")
 	subNames := r.Form["subs"]
 
@@ -57,13 +60,20 @@ func (h *Hub) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) handleDisconnect(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 	// Run disconnect synchronously so state is updated before the redirect.
 	h.doDisconnect()
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (h *Hub) handleSubscribe(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 	name := r.FormValue("name")
 	checked := r.FormValue("checked") == "true"
 
