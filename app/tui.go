@@ -765,23 +765,25 @@ func nextMsg(ch chan tea.Msg) tea.Cmd {
 
 // readLoopCmd fans out status lines into ch and starts draining with nextMsg.
 func readLoopCmd(conn *radio.Conn, ch chan tea.Msg) tea.Cmd {
-	conn.OnLog = func(direction, line string) {
-		var text string
-		if direction == "tx" {
-			text = styleTx.Render("→ ") + line
-		} else {
-			text = styleRx.Render("← ") + line
+	return func() tea.Msg {
+		conn.OnLog = func(direction, line string) {
+			var text string
+			if direction == "tx" {
+				text = styleTx.Render("→ ") + line
+			} else {
+				text = styleRx.Render("← ") + line
+			}
+			ch <- logLineMsg{text: text}
 		}
-		ch <- logLineMsg{text: text}
+		go func() {
+			err := conn.ReadLoop(func(msg radio.ParsedMessage) {
+				ch <- logLineMsg{text: fmt.Sprintf("%-30s %v", msg.Object, msg.KVs)}
+			})
+			ch <- disconnectedMsg{conn: conn, err: err}
+			close(ch)
+		}()
+		return nextMsg(ch)()
 	}
-	go func() {
-		err := conn.ReadLoop(func(msg radio.ParsedMessage) {
-			ch <- logLineMsg{text: fmt.Sprintf("%-30s %v", msg.Object, msg.KVs)}
-		})
-		ch <- disconnectedMsg{conn: conn, err: err}
-		close(ch)
-	}()
-	return nextMsg(ch)
 }
 
 // reconnectCmd attempts to re-dial the radio after a disconnect.
