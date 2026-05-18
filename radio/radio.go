@@ -140,6 +140,21 @@ func (rc *Conn) State() ConnectionState {
 	return ConnectionState(rc.state.Load())
 }
 
+// GetHandle returns the radio handle assigned during handshake.
+func (rc *Conn) GetHandle() uint32 { return rc.Handle }
+
+// GetVersion returns the radio firmware version from the handshake.
+func (rc *Conn) GetVersion() string { return rc.Version }
+
+// SetOnLog sets the OnLog callback.
+func (rc *Conn) SetOnLog(fn func(string, string)) { rc.OnLog = fn }
+
+// SetOnStateChange sets the OnStateChange callback.
+func (rc *Conn) SetOnStateChange(fn func(ConnectionState, ConnectionState)) { rc.OnStateChange = fn }
+
+// SetOnPingRtt sets the OnPingRtt callback.
+func (rc *Conn) SetOnPingRtt(fn func(int)) { rc.OnPingRtt = fn }
+
 func (rc *Conn) setState(s ConnectionState) {
 	old := ConnectionState(rc.state.Swap(int32(s)))
 	if old != s && rc.OnStateChange != nil {
@@ -375,7 +390,9 @@ func (rc *Conn) stopReconnect() {
 		rc.reconnectTimer = nil
 	}
 	rc.reconnectStopOnce.Do(func() {
-		close(rc.reconnectStopCh)
+		if rc.reconnectStopCh != nil {
+			close(rc.reconnectStopCh)
+		}
 	})
 	// Signal any waiter on ReconnectDone that reconnect won't happen.
 	if rc.reconnectDoneCh != nil {

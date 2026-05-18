@@ -4,10 +4,16 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"goFlex/config"
 )
@@ -75,10 +81,8 @@ func renderToString(name string, data templateData) string {
 	return buf.String()
 }
 
-// Serve starts the HTTP server with the given config.
-func Serve(cfg *config.Config) error {
-	hub := NewHub(cfg)
-
+// NewMux returns an http.Handler with all routes wired to the given Hub.
+func NewMux(hub *Hub) http.Handler {
 	mux := http.NewServeMux()
 
 	// Page
@@ -104,11 +108,54 @@ func Serve(cfg *config.Config) error {
 	// Static assets
 	mux.Handle("/static/", http.FileServer(http.FS(templateFS)))
 
+	return mux
+}
+
+// Serve starts the HTTP server with the given config.
+// It blocks until the server is shut down via interrupt signal.
+func Serve(cfg *config.Config) error {
+	hub := NewHub(cfg)
+
 	addr := ":8080"
 	log.Printf("goFlex web UI starting on http://localhost%s", addr)
 	log.Printf("Radio: %s:%d", cfg.RadioAddress, cfg.RadioPort)
 
-	// Clean shutdown on interrupt is handled by the OS; the radio conn
-	// will be closed when the process exits.
-	return http.ListenAndServe(addr, mux)
+	return serveWithHub(hub, addr)
+}
+
+// serveWithHub starts an http.Server on the given address and handles
+// graceful shutdown on SIGINT / SIGTERM.
+func serveWithHub(hub *Hub, addr string) error {
+	server := &http.Server{
+		Addr:    addr,
+		Handler: NewMux(hub),
+	}
+
+	// Graceful shutdown on interrupt.
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		<-sigCh
+
+		log.Println("shutting down web server...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("shutdown error: %v", err)
+		}
+		hub.Close()
+	}()
+
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+// ServeWithListener starts the server on an existing listener (useful for tests).
+func ServeWithListener(hub *Hub, ln net.Listener) error {
+	server := &http.Server{
+		Handler: NewMux(hub),
+	}
+	return server.Serve(ln)
 }

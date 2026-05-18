@@ -30,6 +30,22 @@ type Event struct {
 	Data string
 }
 
+// RadioConn is the subset of radio.Conn used by Hub, extracted for testability.
+type RadioConn interface {
+	Send(string, func(int, string)) (uint32, error)
+	EnableReconnect()
+	DisableReconnect()
+	Close()
+	ReadLoop(func(radio.ParsedMessage)) error
+	ReconnectDone() <-chan struct{}
+	State() radio.ConnectionState
+	GetHandle() uint32
+	GetVersion() string
+	SetOnLog(func(string, string))
+	SetOnStateChange(func(radio.ConnectionState, radio.ConnectionState))
+	SetOnPingRtt(func(int))
+}
+
 // Hub owns all shared state and runs the event loop.
 type Hub struct {
 	cfg *config.Config
@@ -41,13 +57,16 @@ type Hub struct {
 	discCancel  context.CancelFunc
 
 	// Connection
-	conn      *radio.Conn
+	conn      RadioConn
 	connected bool
 	dialing   bool
 	addr      string
 
 	// dialFunc is injected for testing; defaults to radio.Dial.
 	dialFunc func(string) (*radio.Conn, error)
+
+	// discoveryFunc is injected for testing; defaults to radio.Listen.
+	discoveryFunc func(context.Context) (<-chan radio.DiscoveryEvent, error)
 
 	// Subscriptions
 	subs []subscription
@@ -67,6 +86,9 @@ type Hub struct {
 
 	// Command channel from HTTP handlers
 	commands chan Command
+
+	// closeOnce ensures Close is idempotent.
+	closeOnce sync.Once
 }
 
 type subscription struct {
@@ -105,13 +127,14 @@ func defaultSubs() []subscription {
 // NewHub creates a Hub and starts its event loop.
 func NewHub(cfg *config.Config) *Hub {
 	h := &Hub{
-		cfg:         cfg,
-		subs:        defaultSubs(),
-		slices:      radio.NewSliceCollector(),
-		subscribers: make(map[chan Event]struct{}),
-		commands:    make(chan Command, 16),
-		addr:        fmt.Sprintf("%s:%d", cfg.RadioAddress, cfg.RadioPort),
-		dialFunc:    radio.Dial,
+		cfg:           cfg,
+		subs:          defaultSubs(),
+		slices:        radio.NewSliceCollector(),
+		subscribers:   make(map[chan Event]struct{}),
+		commands:      make(chan Command, 16),
+		addr:          fmt.Sprintf("%s:%d", cfg.RadioAddress, cfg.RadioPort),
+		dialFunc:      radio.Dial,
+		discoveryFunc: radio.Listen,
 	}
 	go h.startDiscovery()
 	go h.loop()
@@ -119,8 +142,22 @@ func NewHub(cfg *config.Config) *Hub {
 }
 
 // SendCommand queues a command for the event loop.
+// It silently drops the command if the Hub has been closed.
 func (h *Hub) SendCommand(cmd Command) {
+	defer func() {
+		if recover() != nil {
+			// Channel was closed — ignore.
+		}
+	}()
 	h.commands <- cmd
+}
+
+// Close stops the discovery goroutine and shuts down the event loop.
+func (h *Hub) Close() {
+	h.stopDiscovery()
+	h.closeOnce.Do(func() {
+		close(h.commands)
+	})
 }
 
 // ─── Read accessors (thread-safe) ──────────────────────────────────────────
@@ -187,7 +224,7 @@ func (h *Hub) ConnInfo() (handle uint32, version string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	if h.conn != nil {
-		return h.conn.Handle, h.conn.Version
+		return h.conn.GetHandle(), h.conn.GetVersion()
 	}
 	return 0, ""
 }
@@ -226,18 +263,22 @@ func (h *Hub) broadcast(evt Event) {
 
 func (h *Hub) loop() {
 	for cmd := range h.commands {
-		switch cmd.Kind {
-		case "connect":
-			h.doConnect(cmd.Addr, cmd.Subs)
-		case "disconnect":
-			h.doDisconnect()
-		case "subscribe":
-			h.doSubscribe(cmd.Name, cmd.Val == "true")
-		case "tune":
-			h.doTune(cmd.Val)
-		case "command":
-			h.doRawCommand(cmd.Val)
-		}
+		h.processCommand(cmd)
+	}
+}
+
+func (h *Hub) processCommand(cmd Command) {
+	switch cmd.Kind {
+	case "connect":
+		h.doConnect(cmd.Addr, cmd.Subs)
+	case "disconnect":
+		h.doDisconnect()
+	case "subscribe":
+		h.doSubscribe(cmd.Name, cmd.Val == "true")
+	case "tune":
+		h.doTune(cmd.Val)
+	case "command":
+		h.doRawCommand(cmd.Val)
 	}
 }
 
@@ -251,7 +292,7 @@ func (h *Hub) startDiscovery() {
 	h.discCancel = cancel
 	h.mu.Unlock()
 
-	evtCh, err := radio.Listen(ctx)
+	evtCh, err := h.discoveryFunc(ctx)
 	if err != nil {
 		h.mu.Lock()
 		h.discovering = false
@@ -304,11 +345,12 @@ func (h *Hub) doConnect(addr string, subNames []string) {
 	for i := range h.subs {
 		h.subs[i].Checked = checked[h.subs[i].Name]
 	}
+	dialAddr := h.addr
 	h.mu.Unlock()
 
 	h.broadcast(Event{Kind: "state", Data: "connecting"})
 
-	conn, err := h.dialFunc(h.addr)
+	conn, err := h.dialFunc(dialAddr)
 	if err != nil {
 		h.mu.Lock()
 		h.dialing = false
@@ -323,36 +365,16 @@ func (h *Hub) doConnect(addr string, subNames []string) {
 	h.conn = conn
 	h.connected = true
 	h.dialing = false
-	h.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", conn.Handle, conn.Version)
+	h.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", conn.GetHandle(), conn.GetVersion())
 	h.logBuf = nil
 	h.mu.Unlock()
 
 	// Wire up callbacks BEFORE sending commands so they're captured.
-	conn.OnLog = func(direction, line string) {
-		var prefix string
-		if direction == "tx" {
-			prefix = "→ "
-		} else {
-			prefix = "← "
-		}
-		h.appendLog(prefix + line)
-		h.broadcast(Event{Kind: "log", Data: prefix + line})
-	}
-	conn.OnStateChange = func(oldState, newState radio.ConnectionState) {
-		msg := fmt.Sprintf("[state] %s → %s", oldState, newState)
-		h.appendLog(msg)
-		h.broadcast(Event{Kind: "log", Data: msg})
-		h.broadcast(Event{Kind: "state", Data: "changed"})
-	}
-	conn.OnPingRtt = func(ms int) {
-		msg := fmt.Sprintf("[ping] RTT %d ms", ms)
-		h.appendLog(msg)
-		h.broadcast(Event{Kind: "log", Data: msg})
-	}
+	h.wireCallbacks(conn)
 
 	// Log initial connection info.
 	h.appendLog(fmt.Sprintf("Connected to %s", h.addr))
-	h.appendLog(fmt.Sprintf("Version: %s  Handle: 0x%X", conn.Version, conn.Handle))
+	h.appendLog(fmt.Sprintf("Version: %s  Handle: 0x%X", conn.GetVersion(), conn.GetHandle()))
 
 	// Subscribe to checked items.
 	for _, s := range h.subs {
@@ -411,7 +433,7 @@ func (h *Hub) doConnect(addr string, subNames []string) {
 					h.mu.Lock()
 					h.connected = true
 					h.conn = conn
-					h.status = fmt.Sprintf("Reconnected  handle=0x%X  version=%s", conn.Handle, conn.Version)
+					h.status = fmt.Sprintf("Reconnected  handle=0x%X  version=%s", conn.GetHandle(), conn.GetVersion())
 					h.mu.Unlock()
 					h.appendLog("[conn] reconnected successfully")
 					h.broadcast(Event{Kind: "state", Data: "connected"})
@@ -427,6 +449,30 @@ func (h *Hub) doConnect(addr string, subNames []string) {
 	}()
 
 	h.broadcast(Event{Kind: "state", Data: "connected"})
+}
+
+func (h *Hub) wireCallbacks(conn RadioConn) {
+	conn.SetOnLog(func(direction, line string) {
+		var prefix string
+		if direction == "tx" {
+			prefix = "→ "
+		} else {
+			prefix = "← "
+		}
+		h.appendLog(prefix + line)
+		h.broadcast(Event{Kind: "log", Data: prefix + line})
+	})
+	conn.SetOnStateChange(func(oldState, newState radio.ConnectionState) {
+		msg := fmt.Sprintf("[state] %s → %s", oldState, newState)
+		h.appendLog(msg)
+		h.broadcast(Event{Kind: "log", Data: msg})
+		h.broadcast(Event{Kind: "state", Data: "changed"})
+	})
+	conn.SetOnPingRtt(func(ms int) {
+		msg := fmt.Sprintf("[ping] RTT %d ms", ms)
+		h.appendLog(msg)
+		h.broadcast(Event{Kind: "log", Data: msg})
+	})
 }
 
 func (h *Hub) readLoopAgain(conn *radio.Conn) {
@@ -466,18 +512,17 @@ func (h *Hub) doSubscribe(name string, checked bool) {
 	h.mu.RLock()
 	conn := h.conn
 	h.mu.RUnlock()
-	if conn == nil {
-		return
-	}
 
-	var cmd string
-	if checked {
-		cmd = fmt.Sprintf("sub %s all", name)
-	} else {
-		cmd = fmt.Sprintf("unsub %s all", name)
-	}
-	if _, err := conn.Send(cmd, nil); err != nil {
-		h.appendLog(fmt.Sprintf("[sub] failed to toggle %s: %v", name, err))
+	if conn != nil {
+		var cmd string
+		if checked {
+			cmd = fmt.Sprintf("sub %s all", name)
+		} else {
+			cmd = fmt.Sprintf("unsub %s all", name)
+		}
+		if _, err := conn.Send(cmd, nil); err != nil {
+			h.appendLog(fmt.Sprintf("[sub] failed to toggle %s: %v", name, err))
+		}
 	}
 
 	h.mu.Lock()
