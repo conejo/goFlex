@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"goFlex/config"
 	"goFlex/radio"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -155,7 +156,12 @@ func TestRemoveRadio_NotFound(t *testing.T) {
 // ─── Model helpers ──────────────────────────────────────────────────────────
 
 func TestModel_LogHeight(t *testing.T) {
-	m := model{height: 30, width: 80, ui: uiState{subs: newDefaultSubs()}}
+	m := newModel(&config.Config{MaxLog: 100},
+		func(m *model) {
+			m.height = 30
+			m.width = 80
+		},
+	)
 	// Not connected, showSubs true → subs panel visible.
 	m.connState.connected = false
 	m.ui.showSubs = true
@@ -167,7 +173,12 @@ func TestModel_LogHeight(t *testing.T) {
 }
 
 func TestModel_LogHeight_Connected(t *testing.T) {
-	m := model{height: 30, width: 80, ui: uiState{subs: newDefaultSubs()}}
+	m := newModel(&config.Config{MaxLog: 100},
+		func(m *model) {
+			m.height = 30
+			m.width = 80
+		},
+	)
 	m.connState.connected = true
 	m.ui.showSubs = false
 	h := m.logHeight()
@@ -183,7 +194,16 @@ func TestModel_WithScrollUp(t *testing.T) {
 	for i := range entries {
 		entries[i] = "this is a moderately long log line that will wrap or at least consume height"
 	}
-	m := model{height: 10, width: 40, connState: connectionState{connected: true}, ui: uiState{showSubs: false}, log: logState{entries: entries}}
+	m := newModel(
+		&config.Config{MaxLog: 100},
+		func(m *model) {
+			m.height = 10
+			m.width = 40
+			m.connState.connected = true
+			m.ui.showSubs = false
+			m.log.entries = entries
+		},
+	)
 	m.ui.scrollOffset = 0
 	m = m.withScrollUp()
 	if m.ui.scrollOffset != 1 {
@@ -192,7 +212,16 @@ func TestModel_WithScrollUp(t *testing.T) {
 }
 
 func TestModel_WithScrollDown(t *testing.T) {
-	m := model{height: 30, width: 80, connState: connectionState{connected: true}, ui: uiState{showSubs: false, scrollOffset: 2}}
+	m := newModel(
+		&config.Config{MaxLog: 100},
+		func(m *model) {
+			m.height = 30
+			m.width = 80
+			m.connState.connected = true
+			m.ui.showSubs = false
+			m.ui.scrollOffset = 2
+		},
+	)
 	m = m.withScrollDown()
 	if m.ui.scrollOffset != 1 {
 		t.Fatalf("scrollOffset: want 1, got %d", m.ui.scrollOffset)
@@ -200,7 +229,14 @@ func TestModel_WithScrollDown(t *testing.T) {
 }
 
 func TestModel_MaxScrollOffset(t *testing.T) {
-	m := model{height: 10, width: 40, log: logState{entries: []string{"hello world this is a long log entry"}}}
+	m := newModel(
+		&config.Config{MaxLog: 100},
+		func(m *model) {
+			m.height = 10
+			m.width = 40
+			m.log.entries = []string{"hello world this is a long log entry"}
+		},
+	)
 	max := m.maxScrollOffset()
 	if max < 0 {
 		t.Fatalf("maxScrollOffset should be >= 0, got %d", max)
@@ -242,7 +278,16 @@ func TestNextMsg_ClosedChannel(t *testing.T) {
 // ─── Frequency input model helpers ──────────────────────────────────────────
 
 func TestModel_SettingFreq_Enter(t *testing.T) {
-	m := model{height: 30, width: 80, connState: connectionState{connected: true}, ui: uiState{settingFreq: true, freqInput: "14.300"}}
+	m := newModel(
+		&config.Config{MaxLog: 100},
+		func(m *model) {
+			m.height = 30
+			m.width = 80
+			m.connState.connected = true
+			m.ui.settingFreq = true
+			m.ui.freqInput = "14.300"
+		},
+	)
 	m = m.withScrollUp() // should not affect freq input mode
 	if !m.ui.settingFreq {
 		t.Fatal("settingFreq should remain true")
@@ -250,7 +295,16 @@ func TestModel_SettingFreq_Enter(t *testing.T) {
 }
 
 func TestModel_ViewFreqPrompt(t *testing.T) {
-	m := model{height: 30, width: 80, connState: connectionState{connected: true}, ui: uiState{settingFreq: true, freqInput: "7.200"}}
+	m := newModel(
+		&config.Config{MaxLog: 100},
+		func(m *model) {
+			m.height = 30
+			m.width = 80
+			m.connState.connected = true
+			m.ui.settingFreq = true
+			m.ui.freqInput = "7.200"
+		},
+	)
 	prompt := m.viewFreqPrompt()
 	if prompt == "" {
 		t.Fatal("expected non-empty prompt")
@@ -261,7 +315,15 @@ func TestModel_ViewFreqPrompt(t *testing.T) {
 }
 
 func TestModel_ViewFreqPrompt_Hidden(t *testing.T) {
-	m := model{height: 30, width: 80, connState: connectionState{connected: true}, ui: uiState{settingFreq: false}}
+	m := newModel(
+		&config.Config{MaxLog: 100},
+		func(m *model) {
+			m.height = 30
+			m.width = 80
+			m.connState.connected = true
+			m.ui.settingFreq = false
+		},
+	)
 	prompt := m.viewFreqPrompt()
 	if prompt != "" {
 		t.Fatalf("expected empty prompt when not setting freq, got %q", prompt)
