@@ -30,22 +30,6 @@ type Event struct {
 	Data string
 }
 
-// RadioConn is the subset of radio.Conn used by Hub, extracted for testability.
-type RadioConn interface {
-	Send(string, func(int, string)) (uint32, error)
-	EnableReconnect()
-	DisableReconnect()
-	Close()
-	ReadLoop(func(radio.ParsedMessage)) error
-	ReconnectDone() <-chan struct{}
-	State() radio.ConnectionState
-	GetHandle() uint32
-	GetVersion() string
-	SetOnLog(func(string, string))
-	SetOnStateChange(func(radio.ConnectionState, radio.ConnectionState))
-	SetOnPingRtt(func(int))
-}
-
 // Hub owns all shared state and runs the event loop.
 type Hub struct {
 	cfg *config.Config
@@ -57,13 +41,13 @@ type Hub struct {
 	discCancel  context.CancelFunc
 
 	// Connection
-	conn      RadioConn
+	conn      radio.RadioConn
 	connected bool
 	dialing   bool
 	addr      string
 
 	// dialFunc is injected for testing; defaults to radio.Dial.
-	dialFunc func(string) (*radio.Conn, error)
+	dialFunc func(string) (radio.RadioConn, error)
 
 	// discoveryFunc is injected for testing; defaults to radio.Listen.
 	discoveryFunc func(context.Context) (<-chan radio.DiscoveryEvent, error)
@@ -133,7 +117,7 @@ func NewHub(cfg *config.Config) *Hub {
 		subscribers:   make(map[chan Event]struct{}),
 		commands:      make(chan Command, 16),
 		addr:          fmt.Sprintf("%s:%d", cfg.RadioAddress, cfg.RadioPort),
-		dialFunc:      radio.Dial,
+		dialFunc:      func(addr string) (radio.RadioConn, error) { return radio.Dial(addr) },
 		discoveryFunc: radio.Listen,
 	}
 	go h.startDiscovery()
@@ -451,7 +435,7 @@ func (h *Hub) doConnect(addr string, subNames []string) {
 	h.broadcast(Event{Kind: "state", Data: "connected"})
 }
 
-func (h *Hub) wireCallbacks(conn RadioConn) {
+func (h *Hub) wireCallbacks(conn radio.RadioConn) {
 	conn.SetOnLog(func(direction, line string) {
 		var prefix string
 		if direction == "tx" {
@@ -475,7 +459,7 @@ func (h *Hub) wireCallbacks(conn RadioConn) {
 	})
 }
 
-func (h *Hub) readLoopAgain(conn *radio.Conn) {
+func (h *Hub) readLoopAgain(conn radio.RadioConn) {
 	err := conn.ReadLoop(func(msg radio.ParsedMessage) {
 		h.slices.HandleStatus(msg)
 		line := fmt.Sprintf("%-30s %v", msg.Object, msg.KVs)

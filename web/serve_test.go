@@ -21,7 +21,7 @@ func TestServeWithListener_EndToEnd(t *testing.T) {
 		slices:      radio.NewSliceCollector(),
 		subscribers: make(map[chan Event]struct{}),
 		commands:    make(chan Command, 16),
-		dialFunc:    func(string) (*radio.Conn, error) { return nil, fmt.Errorf("mock dial") },
+		dialFunc:    func(string) (radio.RadioConn, error) { return nil, fmt.Errorf("mock dial") },
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

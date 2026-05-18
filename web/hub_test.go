@@ -239,7 +239,7 @@ func TestHub_ProcessCommand_Connect(t *testing.T) {
 	hub := &Hub{
 		cfg:      &config.Config{MaxLog: 100},
 		addr:     "192.168.1.1:4992",
-		dialFunc: func(string) (*radio.Conn, error) { return nil, fmt.Errorf("mock dial fail") },
+		dialFunc: func(string) (radio.RadioConn, error) { return nil, fmt.Errorf("mock dial fail") },
 	}
 	hub.processCommand(Command{Kind: "connect", Addr: "192.168.1.1:4992"})
 	// Should set dialing then fail; status should reflect error.
@@ -381,6 +381,8 @@ func (m *mockRadioConn) SetOnStateChange(fn func(radio.ConnectionState, radio.Co
 	m.OnStateChange = fn
 }
 func (m *mockRadioConn) SetOnPingRtt(fn func(int)) { m.OnPingRtt = fn }
+
+func (m *mockRadioConn) OnDisconnected() {}
 
 func TestHub_DoSubscribe_WithMockConn(t *testing.T) {
 	mock := &mockRadioConn{handle: 0x1234, version: "3.0.0"}
@@ -539,7 +541,7 @@ func TestHub_DoConnect_DialFailure(t *testing.T) {
 		subs:        defaultSubs(),
 		slices:      radio.NewSliceCollector(),
 		subscribers: make(map[chan Event]struct{}),
-		dialFunc:    func(string) (*radio.Conn, error) { return nil, fmt.Errorf("connection refused") },
+		dialFunc:    func(string) (radio.RadioConn, error) { return nil, fmt.Errorf("connection refused") },
 	}
 
 	hub.doConnect("192.168.1.100:4992", nil)
@@ -562,7 +564,7 @@ func TestHub_DoConnect_AlreadyConnected(t *testing.T) {
 		connected:   true,
 		conn:        mock,
 		subscribers: make(map[chan Event]struct{}),
-		dialFunc:    func(string) (*radio.Conn, error) { t.Fatal("dial should not be called"); return nil, nil },
+		dialFunc:    func(string) (radio.RadioConn, error) { t.Fatal("dial should not be called"); return nil, nil },
 	}
 
 	hub.doConnect("192.168.1.100:4992", nil)
@@ -577,7 +579,7 @@ func TestHub_DoConnect_AlreadyDialing(t *testing.T) {
 		cfg:         &config.Config{MaxLog: 100},
 		dialing:     true,
 		subscribers: make(map[chan Event]struct{}),
-		dialFunc:    func(string) (*radio.Conn, error) { t.Fatal("dial should not be called"); return nil, nil },
+		dialFunc:    func(string) (radio.RadioConn, error) { t.Fatal("dial should not be called"); return nil, nil },
 	}
 
 	hub.doConnect("192.168.1.100:4992", nil)
@@ -700,7 +702,7 @@ func TestHub_Close_WaitsForLoop(t *testing.T) {
 		slices:      radio.NewSliceCollector(),
 		subscribers: make(map[chan Event]struct{}),
 		commands:    make(chan Command, 16),
-		dialFunc:    func(string) (*radio.Conn, error) { return nil, fmt.Errorf("mock dial") },
+		dialFunc:    func(string) (radio.RadioConn, error) { return nil, fmt.Errorf("mock dial") },
 	}
 	go hub.loop()
 

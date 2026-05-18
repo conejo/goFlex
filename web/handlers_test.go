@@ -106,7 +106,7 @@ func TestHandleConnect_Redirects(t *testing.T) {
 		subscribers: make(map[chan Event]struct{}),
 		commands:    make(chan Command, 16),
 		addr:        "192.168.1.1:4992",
-		dialFunc:    func(string) (*radio.Conn, error) { return nil, fmt.Errorf("mock dial fail") },
+		dialFunc:    func(string) (radio.RadioConn, error) { return nil, fmt.Errorf("mock dial fail") },
 	}
 
 	body := strings.NewReader("addr=192.168.1.1:4992&subs=slice&subs=pan")

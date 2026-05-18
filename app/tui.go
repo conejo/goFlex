@@ -20,17 +20,17 @@ import (
 // ─── Tea messages ─────────────────────────────────────────────────────────────
 
 type connectedMsg struct {
-	conn     *radio.Conn
+	conn     radio.RadioConn
 	errMsg   string
 	initLogs []string
 }
 
 type disconnectedMsg struct {
-	conn *radio.Conn
+	conn radio.RadioConn
 	err  error // non-nil if the disconnect was due to an error
 }
 type reconnectFailedMsg struct{ errMsg string }
-type reconnectSuccessMsg struct{ conn *radio.Conn }
+type reconnectSuccessMsg struct{ conn radio.RadioConn }
 
 type statusLineMsg struct{ text string }
 type logLineMsg struct{ text string }
@@ -95,7 +95,7 @@ type connectionState struct {
 	addr      string
 	connected bool
 	dialing   bool
-	conn      *radio.Conn
+	conn      radio.RadioConn
 }
 
 // uiState holds all interactive UI state (cursor, scroll, input, etc.).
@@ -126,6 +126,10 @@ type model struct {
 	height int
 	width  int
 	cfg    *config.Config
+
+	// Injectable dependencies for testability.
+	dialFunc      func(string) (radio.RadioConn, error)
+	discoveryFunc func(context.Context) (<-chan radio.DiscoveryEvent, error)
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -211,7 +215,7 @@ func (m model) withScrollDown() model {
 
 // ─── Init / Update / View ─────────────────────────────────────────────────────
 
-func (m model) Init() tea.Cmd { return startDiscoveryCmd() }
+func (m model) Init() tea.Cmd { return m.startDiscoveryCmd() }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -354,15 +358,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.connState.connected = true
 			m.connState.conn = msg.conn
 			m.log.entries = append(m.log.entries, msg.initLogs...)
-			m.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", m.connState.conn.Handle, m.connState.conn.Version)
+			m.status = fmt.Sprintf("Connected  handle=0x%X  version=%s", m.connState.conn.GetHandle(), m.connState.conn.GetVersion())
 			m.ui.readCh = make(chan tea.Msg, 64)
 			m.connState.conn.EnableReconnect()
-			m.connState.conn.OnStateChange = func(oldState, newState radio.ConnectionState) {
+			m.connState.conn.SetOnStateChange(func(oldState, newState radio.ConnectionState) {
 				m.ui.readCh <- logLineMsg{text: fmt.Sprintf("[state] %s → %s", oldState, newState)}
-			}
-			m.connState.conn.OnPingRtt = func(ms int) {
+			})
+			m.connState.conn.SetOnPingRtt(func(ms int) {
 				m.ui.readCh <- logLineMsg{text: fmt.Sprintf("[ping] RTT %d ms", ms)}
-			}
+			})
 			return m, readLoopCmd(m.connState.conn, m.ui.readCh)
 		}
 
@@ -384,15 +388,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reconnectSuccessMsg:
 		m.connState.connected = true
 		m.connState.conn = msg.conn
-		m.status = fmt.Sprintf("Reconnected  handle=0x%X  version=%s", m.connState.conn.Handle, m.connState.conn.Version)
+		m.status = fmt.Sprintf("Reconnected  handle=0x%X  version=%s", m.connState.conn.GetHandle(), m.connState.conn.GetVersion())
 		m.log.entries = append(m.log.entries, "[conn] reconnected successfully")
 		m.ui.readCh = make(chan tea.Msg, 64)
-		m.connState.conn.OnStateChange = func(oldState, newState radio.ConnectionState) {
+		m.connState.conn.SetOnStateChange(func(oldState, newState radio.ConnectionState) {
 			m.ui.readCh <- logLineMsg{text: fmt.Sprintf("[state] %s → %s", oldState, newState)}
-		}
-		m.connState.conn.OnPingRtt = func(ms int) {
+		})
+		m.connState.conn.SetOnPingRtt(func(ms int) {
 			m.ui.readCh <- logLineMsg{text: fmt.Sprintf("[ping] RTT %d ms", ms)}
-		}
+		})
 		return m, readLoopCmd(m.connState.conn, m.ui.readCh)
 
 	case statusLineMsg:
@@ -625,13 +629,13 @@ func (m model) connectCmd() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		conn, err := radio.Dial(m.connState.addr)
+		conn, err := m.dialFunc(m.connState.addr)
 		if err != nil {
 			return connectedMsg{errMsg: err.Error()}
 		}
 
 		var initLogs []string
-		conn.OnLog = func(dir, line string) {
+		conn.SetOnLog(func(dir, line string) {
 			var text string
 			if dir == "tx" {
 				text = styleTx.Render("→ ") + line
@@ -639,7 +643,7 @@ func (m model) connectCmd() tea.Cmd {
 				text = styleRx.Render("← ") + line
 			}
 			initLogs = append(initLogs, text)
-		}
+		})
 
 		for _, name := range subs {
 			if _, err := conn.Send(fmt.Sprintf("sub %s all", name), func(code int, body string) {
@@ -667,7 +671,7 @@ func (m model) connectCmd() tea.Cmd {
 }
 
 // toggleSubCmd sends sub/unsub for a single subscription while connected.
-func toggleSubCmd(conn *radio.Conn, s subscription) tea.Cmd {
+func toggleSubCmd(conn radio.RadioConn, s subscription) tea.Cmd {
 	return func() tea.Msg {
 		var cmd string
 		if s.checked {
@@ -688,7 +692,7 @@ func toggleSubCmd(conn *radio.Conn, s subscription) tea.Cmd {
 // AetherSDR uses:  slice tune <id> <freq_mhz> autopan=0
 //   - Frequency is sent in MHz (not Hz).
 //   - autopan=0 prevents the radio from recentering the panadapter.
-func setFreqCmd(conn *radio.Conn, freqStr string) tea.Cmd {
+func setFreqCmd(conn radio.RadioConn, freqStr string) tea.Cmd {
 	return func() tea.Msg {
 		mhz, err := strconv.ParseFloat(freqStr, 64)
 		if err != nil {
@@ -708,10 +712,10 @@ func setFreqCmd(conn *radio.Conn, freqStr string) tea.Cmd {
 }
 
 // startDiscoveryCmd opens the UDP discovery socket and returns a discoveryStartedMsg.
-func startDiscoveryCmd() tea.Cmd {
+func (m model) startDiscoveryCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
-		evtCh, err := radio.Listen(ctx)
+		evtCh, err := m.discoveryFunc(ctx)
 		if err != nil {
 			cancel()
 			return statusLineMsg{text: fmt.Sprintf("discovery error: %v", err)}
@@ -764,9 +768,9 @@ func nextMsg(ch chan tea.Msg) tea.Cmd {
 }
 
 // readLoopCmd fans out status lines into ch and starts draining with nextMsg.
-func readLoopCmd(conn *radio.Conn, ch chan tea.Msg) tea.Cmd {
+func readLoopCmd(conn radio.RadioConn, ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		conn.OnLog = func(direction, line string) {
+		conn.SetOnLog(func(direction, line string) {
 			var text string
 			if direction == "tx" {
 				text = styleTx.Render("→ ") + line
@@ -774,7 +778,7 @@ func readLoopCmd(conn *radio.Conn, ch chan tea.Msg) tea.Cmd {
 				text = styleRx.Render("← ") + line
 			}
 			ch <- logLineMsg{text: text}
-		}
+		})
 		go func() {
 			err := conn.ReadLoop(func(msg radio.ParsedMessage) {
 				ch <- logLineMsg{text: fmt.Sprintf("%-30s %v", msg.Object, msg.KVs)}
@@ -787,7 +791,7 @@ func readLoopCmd(conn *radio.Conn, ch chan tea.Msg) tea.Cmd {
 }
 
 // reconnectCmd attempts to re-dial the radio after a disconnect.
-func reconnectCmd(oldConn *radio.Conn) tea.Cmd {
+func reconnectCmd(oldConn radio.RadioConn) tea.Cmd {
 	return func() tea.Msg {
 		oldConn.OnDisconnected()
 		// Wait for the reconnect to succeed (or time out).

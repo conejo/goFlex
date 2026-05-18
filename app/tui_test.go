@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,16 +13,19 @@ import (
 )
 
 // newTestModel returns a model in its initial state for testing.
-func newTestModel() model {
-	return model{
-		status: "Scanning for radios…",
-		ui:     uiState{subs: newDefaultSubs()},
-		log:    logState{max: 100},
-		cfg:    &config.Config{MaxLog: 100},
-		connState: connectionState{
-			addr: "192.168.1.1:4992",
+func newTestModel(opts ...modelOpt) model {
+	cfg := &config.Config{MaxLog: 100}
+	return newModel(cfg, append([]modelOpt{
+		func(m *model) {
+			m.connState.addr = "192.168.1.1:4992"
+			m.dialFunc = func(string) (radio.RadioConn, error) {
+				return nil, fmt.Errorf("mock dial: not implemented")
+			}
+			m.discoveryFunc = func(context.Context) (<-chan radio.DiscoveryEvent, error) {
+				return nil, fmt.Errorf("mock discovery: not implemented")
+			}
 		},
-	}
+	}, opts...)...)
 }
 
 // ─── Init ──────────────────────────────────────────────────────────────────
